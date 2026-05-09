@@ -2,11 +2,13 @@ import os
 import logging
 from typing import List, Dict
 
-import openpyxl
+import gspread
+from google.oauth2.service_account import Credentials
 
 logger = logging.getLogger(__name__)
 
-TIPS_FILE = os.environ.get("TIPS_FILE", "tips.xlsx")
+SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1tLbRUYxRpvlUnHAA3F6R8eRezaatznONkDY8YhYczxg")
+CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 
 
 class TipsLoader:
@@ -14,50 +16,67 @@ class TipsLoader:
         self.data: Dict[int, List[Dict]] = {}  # day -> list of tips
 
     def load(self):
-        """Load tips from Excel file."""
-        if not os.path.exists(TIPS_FILE):
-            logger.warning(f"Tips file not found: {TIPS_FILE}")
-            return
-
-        wb = openpyxl.load_workbook(TIPS_FILE)
-        ws = wb.active
-
-        self.data = {}
-        skipped = 0
-
-        for row_idx, row in enumerate(ws.iter_rows(min_row=2, values_only=True), start=2):
-            if not row or row[0] is None:
-                continue
-
-            try:
-                day = int(row[0])
-                title = str(row[1]).strip() if row[1] else ""
-                text = str(row[2]).strip() if row[2] else ""
-            except (ValueError, TypeError):
-                logger.warning(f"Row {row_idx}: invalid data {row}, skipping")
-                skipped += 1
-                continue
-
-            if not text:
-                logger.warning(f"Row {row_idx}: empty text for day {day}, skipping")
-                skipped += 1
-                continue
-
-            if day not in self.data:
-                self.data[day] = []
-
-            self.data[day].append({"title": title, "text": text})
-
-        logger.info(
-            f"Loaded {sum(len(v) for v in self.data.values())} tips "
-            f"for {len(self.data)} days. Skipped: {skipped}"
-        )
+        """Load tips from Google Sheets."""
+        try:
+            # Define the scope for Google Sheets API
+            scopes = [
+                'https://www.googleapis.com/auth/spreadsheets.readonly'
+            ]
+            
+            # Authenticate using service account credentials
+            if not os.path.exists(CREDENTIALS_FILE):
+                logger.warning(f"Credentials file not found: {CREDENTIALS_FILE}")
+                return
+            
+            creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
+            client = gspread.authorize(creds)
+            
+            # Open the spreadsheet by ID
+            spreadsheet = client.open_by_key(SPREADSHEET_ID)
+            worksheet = spreadsheet.sheet1  # Get the first sheet
+            
+            # Get all values from the sheet
+            rows = worksheet.get_all_values()
+            
+            self.data = {}
+            skipped = 0
+            
+            # Skip header row (index 0), start from row 1
+            for row_idx, row in enumerate(rows[1:], start=2):
+                if not row or not row[0]:
+                    continue
+                
+                try:
+                    day = int(row[0])
+                    title = str(row[1]).strip() if len(row) > 1 and row[1] else ""
+                    text = str(row[2]).strip() if len(row) > 2 and row[2] else ""
+                except (ValueError, TypeError, IndexError):
+                    logger.warning(f"Row {row_idx}: invalid data {row}, skipping")
+                    skipped += 1
+                    continue
+                
+                if not text:
+                    logger.warning(f"Row {row_idx}: empty text for day {day}, skipping")
+                    skipped += 1
+                    continue
+                
+                if day not in self.data:
+                    self.data[day] = []
+                
+                self.data[day].append({"title": title, "text": text})
+            
+            logger.info(
+                f"Loaded {sum(len(v) for v in self.data.values())} tips "
+                f"for {len(self.data)} days. Skipped: {skipped}"
+            )
+        except Exception as e:
+            logger.error(f"Error loading tips from Google Sheets: {e}")
 
     def get_tips_for_day(self, day: int) -> List[Dict]:
         """Return list of tips for a given pregnancy day."""
         return self.data.get(day, [])
 
     def reload(self):
-        """Reload tips from file (useful after updating Excel)."""
+        """Reload tips from Google Sheets (useful after updating the spreadsheet)."""
         self.data = {}
         self.load()
