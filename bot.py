@@ -157,7 +157,7 @@ async def send_tips(chat_id, day, day_tips, context):
         text = header
         if tip.get("title"):
             text += f"*{tip['title']}*\n\n"
-        text += tip["text"]
+        text += tip["text"] + "\n"
 
         await context.bot.send_message(
             chat_id=chat_id,
@@ -222,12 +222,13 @@ def main():
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(CommandHandler("debug", debug_command))
 
-    # Schedule daily tips at 9:00 Kyiv time
+    # Schedule tips every 2 hours for testing
     job_queue = app.job_queue
-    job_queue.run_daily(
+    job_queue.run_repeating(
         send_daily_tips,
-        time=time(hour=9, minute=0, tzinfo=KYIV_TZ),
-        name="daily_tips"
+        interval=7200,  # 2 hours in seconds
+        first=10,  # Start after 10 seconds
+        name="tips_every_2_hours"
     )
 
     logger.info("Bot started!")
