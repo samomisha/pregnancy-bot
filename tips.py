@@ -1,5 +1,6 @@
 import os
 import logging
+import json
 from typing import List, Dict
 
 import gspread
@@ -8,7 +9,6 @@ from google.oauth2.service_account import Credentials
 logger = logging.getLogger(__name__)
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID", "1tLbRUYxRpvlUnHAA3F6R8eRezaatznONkDY8YhYczxg")
-CREDENTIALS_FILE = os.environ.get("GOOGLE_CREDENTIALS_FILE", "credentials.json")
 
 
 class TipsLoader:
@@ -23,12 +23,19 @@ class TipsLoader:
                 'https://www.googleapis.com/auth/spreadsheets.readonly'
             ]
             
-            # Authenticate using service account credentials
-            if not os.path.exists(CREDENTIALS_FILE):
-                logger.warning(f"Credentials file not found: {CREDENTIALS_FILE}")
+            # Authenticate using service account credentials from environment variable
+            credentials_json = os.environ.get("GOOGLE_CREDENTIALS_JSON")
+            if not credentials_json:
+                logger.warning("GOOGLE_CREDENTIALS_JSON environment variable not set")
                 return
             
-            creds = Credentials.from_service_account_file(CREDENTIALS_FILE, scopes=scopes)
+            try:
+                credentials_info = json.loads(credentials_json)
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse GOOGLE_CREDENTIALS_JSON: {e}")
+                return
+            
+            creds = Credentials.from_service_account_info(credentials_info, scopes=scopes)
             client = gspread.authorize(creds)
             
             # Open the spreadsheet by ID
