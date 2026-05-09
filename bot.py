@@ -111,6 +111,43 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show debug information: current day and all available days."""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+
+    if not user:
+        await update.message.reply_text(
+            "Ти ще не зареєстрована! Напиши /start щоб розпочати 🌸"
+        )
+        return
+
+    current_day = db.get_current_day(user_id)
+    current_week = (current_day - 1) // 7 + 1
+    
+    # Get all days with tips
+    available_days = sorted(tips.data.keys())
+    
+    # Format available days
+    if available_days:
+        days_str = ", ".join(str(day) for day in available_days)
+        total_tips = sum(len(tips.data[day]) for day in available_days)
+    else:
+        days_str = "немає"
+        total_tips = 0
+    
+    debug_info = (
+        f"🔍 *Debug Information*\n\n"
+        f"👤 User ID: `{user_id}`\n"
+        f"📅 Поточний день: *{current_day}* (тиждень {current_week})\n"
+        f"📊 Всього днів з порадами: *{len(available_days)}*\n"
+        f"💡 Всього порад: *{total_tips}*\n\n"
+        f"📋 Дні з порадами:\n`{days_str}`"
+    )
+    
+    await update.message.reply_text(debug_info, parse_mode="Markdown")
+
+
 async def send_tips(chat_id, day, day_tips, context):
     """Send tips to a specific chat."""
     week = (day - 1) // 7 + 1
@@ -183,6 +220,7 @@ def main():
 
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("today", today_command))
+    app.add_handler(CommandHandler("debug", debug_command))
 
     # Schedule daily tips at 9:00 Kyiv time
     job_queue = app.job_queue
