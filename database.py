@@ -94,12 +94,29 @@ class Database:
         ]
 
     def get_current_day(self, user_id: int) -> int:
-        """Calculate current pregnancy day for user."""
+        """Calculate current pregnancy day for user (TEST MODE: every 2 hours = +1 day)."""
         user = self.get_user(user_id)
         if not user:
             return 0
 
-        registered_date = date.fromisoformat(user["registered_date"])
-        days_since_registration = (date.today() - registered_date).days
+        # Get registered_at timestamp from database
+        conn = self._get_conn()
+        rows = conn.run(
+            "SELECT registered_at FROM users WHERE user_id = :user_id",
+            user_id=user_id
+        )
+        conn.close()
+        
+        if not rows:
+            return 0
+            
+        registered_at = rows[0][0]
+        
+        # Calculate hours since registration
+        hours_since_registration = (datetime.utcnow() - registered_at).total_seconds() / 3600
+        
+        # Every 2 hours = +1 day (test mode)
+        days_since_registration = int(hours_since_registration / 2)
+        
         current_day = user["start_day"] + days_since_registration
         return current_day
