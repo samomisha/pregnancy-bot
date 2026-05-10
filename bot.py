@@ -23,10 +23,13 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Conversation states
-ASK_WEEK = 0
+ASK_DAY = 0
 
 # Timezone for daily sending (Kyiv)
 KYIV_TZ = pytz.timezone("Europe/Kyiv")
+
+# Admin user IDs
+ADMIN_IDS = [260189699, 349776051]
 
 db = Database()
 tips = TipsLoader()
@@ -37,41 +40,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     existing = db.get_user(user_id)
 
-    if existing:
+    if existing and existing.get("status") == "active":
+        db.update_last_active(user_id)
         await update.message.reply_text(
             "👶 Ти вже зареєстрована! Щодня о 9:00 тобі приходитиме порада.\n\n"
-            "Якщо хочеш змінити термін — напиши /restart"
+            "Якщо хочеш змінити термін — напиши /restart\n"
+            "Якщо хочеш відписатися — напиши /stop"
         )
         return ConversationHandler.END
 
     await update.message.reply_text(
         "Привіт! 👋 Я твій помічник для вагітних 🤰\n\n"
         "Щодня я надсилатиму тобі корисні поради відповідно до твого терміну.\n\n"
-        "На якому ти тижні вагітності? Напиши число від 1 до 40:"
+        "На якому ти дні вагітності? Напиши число від 1 до 280:"
     )
-    return ASK_WEEK
+    return ASK_DAY
 
 
-async def receive_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Receive the pregnancy week from user."""
+async def receive_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive the pregnancy day from user."""
     text = update.message.text.strip()
 
     if not text.isdigit():
-        await update.message.reply_text("Будь ласка, напиши число від 1 до 40 👇")
-        return ASK_WEEK
+        await update.message.reply_text("Будь ласка, напиши число від 1 до 280 👇")
+        return ASK_DAY
 
-    week = int(text)
-    if week < 1 or week > 40:
-        await update.message.reply_text("Термін має бути від 1 до 40 тижнів. Спробуй ще раз 👇")
-        return ASK_WEEK
+    day = int(text)
+    if day < 1 or day > 280:
+        await update.message.reply_text("Термін має бути від 1 до 280 днів. Спробуй ще раз 👇")
+        return ASK_DAY
 
     user_id = update.effective_user.id
-    # Convert week to day (start of that week)
-    start_day = (week - 1) * 7 + 1
-    db.save_user(user_id, start_day)
+    db.save_user(user_id, day)
 
+    week = (day - 1) // 7 + 1
     await update.message.reply_text(
-        f"✅ Чудово! Я запам'ятала, що ти на {week}-му тижні.\n\n"
+        f"✅ Чудово! Я запам'ятала, що ти на {day}-му дні ({week}-й тиждень).\n\n"
         f"Щодня о 9:00 ранку тобі приходитиме порада 💛\n\n"
         f"Напиши /today щоб отримати сьогоднішню пораду прямо зараз!"
     )
@@ -83,9 +87,9 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     db.delete_user(user_id)
     await update.message.reply_text(
-        "Починаємо спочатку! На якому ти тижні вагітності? Напиши число від 1 до 40:"
+        "Починаємо спочатку! На якому ти дні вагітності? Напиши число від 1 до 280:"
     )
-    return ASK_WEEK
+    return ASK_DAY
 
 
 async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -93,12 +97,13 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = db.get_user(user_id)
 
-    if not user:
+    if not user or user.get("status") != "active":
         await update.message.reply_text(
             "Ти ще не зареєстрована! Напиши /start щоб розпочати 🌸"
         )
         return
 
+    db.update_last_active(user_id)
     current_day = db.get_current_day(user_id)
     day_tips = tips.get_tips_for_day(current_day)
 
@@ -116,12 +121,13 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     user = db.get_user(user_id)
 
-    if not user:
+    if not user or user.get("status") != "active":
         await update.message.reply_text(
             "Ти ще не зареєстрована! Напиши /start щоб розпочати 🌸"
         )
         return
 
+    db.update_last_active(user_id)
     current_day = db.get_current_day(user_id)
     current_week = (current_day - 1) // 7 + 1
     
@@ -191,6 +197,102 @@ async def send_daily_tips(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"No tips for day {current_day}, skipping user {user_id}")
 
 
+async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Unsubscribe from daily tips."""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+
+    if not user:
+        await update.message.reply_text(
+            "Ти не зареєстрована в боті."
+        )
+        return
+
+    db.set_user_status(user_id, "inactive")
+    db.update_last_active(user_id)
+    
+    await update.message.reply_text(
+        "😔 Ти відписалася від щоденних порад.\n\n"
+        "Якщо захочеш повернутися — просто напиши /start"
+    )
+
+
+async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show statistics (admin only)."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    stats = db.get_stats()
+    trimester_dist = db.get_trimester_distribution()
+    
+    stats_text = (
+        f"📊 *Статистика бота*\n\n"
+        f"👥 Всього користувачів: *{stats['total_users']}*\n"
+        f"✅ Активних: *{stats['active_users']}*\n\n"
+        f"📈 Нових за 7 днів: *{stats['new_7_days']}*\n"
+        f"📈 Нових за 30 днів: *{stats['new_30_days']}*\n\n"
+        f"📉 Відписок за 7 днів: *{stats['unsub_7_days']}*\n"
+        f"📉 Відписок за 30 днів: *{stats['unsub_30_days']}*\n\n"
+        f"🤰 *Розподіл по триместрах:*\n"
+        f"1-й триместр (1-12 тижнів): *{trimester_dist[1]}*\n"
+        f"2-й триместр (13-28 тижнів): *{trimester_dist[2]}*\n"
+        f"3-й триместр (29-40 тижнів): *{trimester_dist[3]}*"
+    )
+    
+    await update.message.reply_text(stats_text, parse_mode="Markdown")
+
+
+async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show users list (admin only)."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    users = db.get_all_users_with_details()
+    
+    if not users:
+        await update.message.reply_text("Немає зареєстрованих користувачів.")
+        return
+    
+    # Get user info from Telegram
+    users_text = "👥 *Список користувачів:*\n\n"
+    
+    for user_data in users[:50]:  # Limit to 50 users per message
+        user_id_val = user_data["user_id"]
+        current_day = user_data["current_day"]
+        current_week = user_data["current_week"]
+        last_active = user_data["last_active"]
+        status = user_data["status"]
+        
+        # Try to get user info
+        try:
+            chat = await context.bot.get_chat(user_id_val)
+            username = chat.username if chat.username else "—"
+            name = chat.first_name or "—"
+        except:
+            username = "—"
+            name = "—"
+        
+        status_emoji = "✅" if status == "active" else "❌"
+        last_active_str = last_active[:10] if last_active else "—"
+        
+        users_text += (
+            f"{status_emoji} *{name}* (@{username})\n"
+            f"   День {current_day} | Тиждень {current_week}\n"
+            f"   Остання активність: {last_active_str}\n\n"
+        )
+    
+    if len(users) > 50:
+        users_text += f"\n_Показано перших 50 з {len(users)} користувачів_"
+    
+    await update.message.reply_text(users_text, parse_mode="Markdown")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -213,7 +315,7 @@ def main():
             CommandHandler("restart", restart),
         ],
         states={
-            ASK_WEEK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week)],
+            ASK_DAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_day)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -221,6 +323,9 @@ def main():
     app.add_handler(conv_handler)
     app.add_handler(CommandHandler("today", today_command))
     app.add_handler(CommandHandler("debug", debug_command))
+    app.add_handler(CommandHandler("stop", stop_command))
+    app.add_handler(CommandHandler("stats", stats_command))
+    app.add_handler(CommandHandler("users", users_command))
 
     # Schedule tips every 2 hours for testing
     job_queue = app.job_queue
