@@ -456,6 +456,30 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send message to admin {admin_id}: {e}")
 
 
+async def notify_admins_startup(context: ContextTypes.DEFAULT_TYPE):
+    """Notify admins that bot has started."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text="🚀 Бот запустився!"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send startup notification to admin {admin_id}: {e}")
+
+
+async def notify_admins_running(context: ContextTypes.DEFAULT_TYPE):
+    """Notify admins that bot is running well."""
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text="✅ Все працює чудово!"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send running notification to admin {admin_id}: {e}")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -507,6 +531,10 @@ def main():
         time=time(hour=9, minute=0, tzinfo=KYIV_TZ),
         name="daily_tips_9am"
     )
+    
+    # Notify admins on startup
+    job_queue.run_once(notify_admins_startup, when=1)  # Immediately after startup
+    job_queue.run_once(notify_admins_running, when=60)  # After 1 minute
 
     logger.info("Bot started!")
     app.run_polling(allowed_updates=Update.ALL_TYPES)
