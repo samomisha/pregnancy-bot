@@ -3,7 +3,7 @@ import os
 from datetime import time
 import pytz
 
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -11,6 +11,7 @@ from telegram.ext import (
     ConversationHandler,
     ContextTypes,
     filters,
+    CallbackQueryHandler,
 )
 
 from database import Database
@@ -24,6 +25,8 @@ logger = logging.getLogger(__name__)
 
 # Conversation states
 ASK_DAY = 0
+ASK_WEEK = 1
+ADMIN_REPLY = 2
 
 # Timezone for daily sending (Kyiv)
 KYIV_TZ = pytz.timezone("Europe/Kyiv")
@@ -49,10 +52,20 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
+    # Show inline buttons for week or day selection
+    keyboard = [
+        [
+            InlineKeyboardButton("📅 Ввести тиждень", callback_data="input_week"),
+            InlineKeyboardButton("🗓 Ввести точний день", callback_data="input_day")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
         "Привіт! 👋 Я твій помічник для вагітних 🤰\n\n"
         "Щодня я надсилатиму тобі корисні поради відповідно до твого терміну.\n\n"
-        "На якому ти дні вагітності? Напиши число від 1 до 280:"
+        "Підкажи на якому ти етапі 🌸 Зазвичай достатньо вказати тиждень — але якщо знаєш точний день, можеш одразу його ввести!",
+        reply_markup=reply_markup
     )
     return ASK_DAY
 
@@ -82,12 +95,69 @@ async def receive_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
+async def button_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle button callbacks for week/day selection."""
+    query = query_update.callback_query
+    await query.answer()
+    
+    if query.data == "input_week":
+        await query.edit_message_text(
+            "📅 Чудово! Напиши номер тижня від 1 до 40:"
+        )
+        context.user_data["input_mode"] = "week"
+        return ASK_WEEK
+    elif query.data == "input_day":
+        await query.edit_message_text(
+            "🗓 Чудово! Напиши день вагітності від 1 до 280:"
+        )
+        context.user_data["input_mode"] = "day"
+        return ASK_DAY
+
+
+async def receive_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Receive the pregnancy week from user and convert to day."""
+    text = update.message.text.strip()
+
+    if not text.isdigit():
+        await update.message.reply_text("Будь ласка, напиши число від 1 до 40 👇")
+        return ASK_WEEK
+
+    week = int(text)
+    if week < 1 or week > 40:
+        await update.message.reply_text("Тиждень має бути від 1 до 40. Спробуй ще раз 👇")
+        return ASK_WEEK
+
+    # Convert week to day (week * 7 - 6)
+    day = week * 7 - 6
+    user_id = update.effective_user.id
+    db.save_user(user_id, day)
+
+    await update.message.reply_text(
+        f"✅ Чудово! Я запам'ятала, що ти на {week}-му тижні ({day}-й день).\n\n"
+        f"Щодня о 9:00 ранку тобі приходитиме порада 💛\n\n"
+        f"Напиши /today щоб отримати сьогоднішню пораду прямо зараз!"
+    )
+    return ConversationHandler.END
+
+
 async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reset user registration."""
     user_id = update.effective_user.id
     db.delete_user(user_id)
+    
+    # Show inline buttons for week or day selection
+    keyboard = [
+        [
+            InlineKeyboardButton("📅 Ввести тиждень", callback_data="input_week"),
+            InlineKeyboardButton("🗓 Ввести точний день", callback_data="input_day")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     await update.message.reply_text(
-        "Починаємо спочатку! На якому ти дні вагітності? Напиши число від 1 до 280:"
+        "Починаємо спочатку!\n\n"
+        "Підкажи на якому ти етапі 🌸 Зазвичай достатньо вказати тиждень — але якщо знаєш точний день, можеш одразу його ввести!",
+        reply_markup=reply_markup
     )
     return ASK_DAY
 
@@ -293,6 +363,101 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(users_text, parse_mode="Markdown")
 
 
+async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle non-command messages from users and forward to admins."""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    # Only handle messages from registered users
+    if not user or user.get("status") != "active":
+        return
+    
+    # Send confirmation to user
+    await update.message.reply_text("Почули тебе 🤍")
+    
+    # Get user info
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = f"@{chat.username}" if chat.username else f"ID: {user_id}"
+    except:
+        username = f"ID: {user_id}"
+    
+    current_day = db.get_current_day(user_id)
+    message_text = update.message.text
+    
+    # Forward to admins with reply button
+    keyboard = [[InlineKeyboardButton("💬 Відповісти", callback_data=f"reply_{user_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    admin_message = (
+        f"📩 Повідомлення від {username} (День {current_day}):\n\n"
+        f"{message_text}"
+    )
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=admin_message,
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Failed to send message to admin {admin_id}: {e}")
+
+
+async def admin_reply_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin reply button press."""
+    query = query_update.callback_query
+    await query.answer()
+    
+    # Extract user_id from callback data
+    user_id = int(query.data.split("_")[1])
+    
+    # Get user info
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = f"@{chat.username}" if chat.username else f"ID: {user_id}"
+    except:
+        username = f"ID: {user_id}"
+    
+    # Store user_id in context for the reply
+    context.user_data["reply_to_user"] = user_id
+    
+    await query.edit_message_text(
+        f"{query.message.text}\n\n"
+        f"💬 Напишіть вашу відповідь для {username}:"
+    )
+
+
+async def admin_send_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send admin's reply to the user."""
+    admin_id = update.effective_user.id
+    
+    # Check if this is an admin replying
+    if admin_id not in ADMIN_IDS:
+        return
+    
+    # Check if there's a user to reply to
+    if "reply_to_user" not in context.user_data:
+        return
+    
+    user_id = context.user_data["reply_to_user"]
+    reply_text = update.message.text
+    
+    # Send reply to user
+    try:
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=reply_text
+        )
+        await update.message.reply_text(f"✅ Відповідь надіслано користувачу!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Помилка при відправці: {e}")
+    
+    # Clear the reply context
+    del context.user_data["reply_to_user"]
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -315,7 +480,11 @@ def main():
             CommandHandler("restart", restart),
         ],
         states={
-            ASK_DAY: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_day)],
+            ASK_DAY: [
+                CallbackQueryHandler(button_callback, pattern="^(input_week|input_day)$"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, receive_day)
+            ],
+            ASK_WEEK: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_week)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
     )
@@ -326,6 +495,13 @@ def main():
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("users", users_command))
+    
+    # Handle admin reply button
+    app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
+    
+    # Handle messages from users (forward to admins) and admin replies
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_reply))
 
     # Schedule tips every 2 hours for testing
     job_queue = app.job_queue
