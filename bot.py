@@ -500,13 +500,12 @@ def main():
     # Handle all non-command text messages (both user messages and admin replies)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Schedule tips every 2 hours for testing
+    # Schedule daily tips at 9:00 AM Kyiv time
     job_queue = app.job_queue
-    job_queue.run_repeating(
+    job_queue.run_daily(
         send_daily_tips,
-        interval=7200,  # 2 hours in seconds
-        first=10,  # Start after 10 seconds
-        name="tips_every_2_hours"
+        time=time(hour=9, minute=0, tzinfo=KYIV_TZ),
+        name="daily_tips_9am"
     )
 
     logger.info("Bot started!")
