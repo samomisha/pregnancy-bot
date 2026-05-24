@@ -485,6 +485,28 @@ async def notify_admins_running(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send running notification to admin {admin_id}: {e}")
 
 
+async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Reload tips from Google Sheets (admin only)."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    await update.message.reply_text("🔄 Оновлюю базу порад...")
+    
+    try:
+        tips.reload()
+        total_tips = sum(len(tips.data[day]) for day in tips.data)
+        total_days = len(tips.data)
+        await update.message.reply_text(
+            f"✅ База оновлена! Завантажено {total_tips} порад для {total_days} днів"
+        )
+    except Exception as e:
+        logger.error(f"Error reloading tips: {e}")
+        await update.message.reply_text(f"❌ Помилка при оновленні: {e}")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -522,6 +544,7 @@ def main():
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("users", users_command))
+    app.add_handler(CommandHandler("reload", reload_command))
     
     # Handle admin reply button
     app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
