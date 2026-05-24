@@ -507,6 +507,89 @@ async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Помилка при оновленні: {e}")
 
 
+async def maintenance_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send maintenance notification to all users (admin only)."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    maintenance_text = (
+        "Дівчатка, зараз ми трішки доналаштовуємо і оновлюємо нашого ботіка 🛠️ "
+        "Можливі невеликі збої в наступні кілька годин. "
+        "Дякуємо за розуміння — з турботою про вас 🌸"
+    )
+    
+    keyboard = [[InlineKeyboardButton("✅ Підтвердити розсилку", callback_data=f"maintenance_confirm")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(
+        f"📢 Розіслати повідомлення про технічні роботи?\n\n"
+        f"{maintenance_text}\n\n"
+        f"⚠️ Кнопка підтвердження зникне через 10 секунд",
+        reply_markup=reply_markup
+    )
+    
+    # Schedule button removal after 10 seconds
+    context.job_queue.run_once(
+        lambda ctx: remove_maintenance_button(ctx, update.message.chat_id, update.message.message_id + 1),
+        when=10
+    )
+
+
+async def remove_maintenance_button(context: ContextTypes.DEFAULT_TYPE, chat_id: int, message_id: int):
+    """Remove the maintenance confirmation button after timeout."""
+    try:
+        await context.bot.edit_message_reply_markup(
+            chat_id=chat_id,
+            message_id=message_id,
+            reply_markup=None
+        )
+    except Exception as e:
+        logger.error(f"Failed to remove maintenance button: {e}")
+
+
+async def maintenance_confirm_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle maintenance broadcast confirmation."""
+    query = query_update.callback_query
+    await query.answer()
+    
+    admin_id = query.from_user.id
+    
+    if admin_id not in ADMIN_IDS:
+        await query.edit_message_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    await query.edit_message_text("📤 Розсилаю повідомлення про технічні роботи...")
+    
+    maintenance_text = (
+        "Дівчатка, зараз ми трішки доналаштовуємо і оновлюємо нашого ботіка 🛠️ "
+        "Можливі невеликі збої в наступні кілька годин. "
+        "Дякуємо за розуміння — з турботою про вас 🌸"
+    )
+    
+    users = db.get_all_users()
+    sent_count = 0
+    
+    for user in users:
+        user_id = user["user_id"]
+        try:
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=maintenance_text,
+                disable_notification=True  # Send without sound
+            )
+            sent_count += 1
+        except Exception as e:
+            logger.error(f"Failed to send maintenance message to {user_id}: {e}")
+    
+    await context.bot.send_message(
+        chat_id=admin_id,
+        text=f"✅ Розіслано {sent_count} користувачам"
+    )
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -545,9 +628,10 @@ def main():
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("users", users_command))
     app.add_handler(CommandHandler("reload", reload_command))
-    
+    app.add_handler(CommandHandler("maintenance", maintenance_command))
     # Handle admin reply button
     app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
+    app.add_handler(CallbackQueryHandler(maintenance_confirm_callback, pattern="^maintenance_confirm$"))
     
     # Handle all non-command text messages (both user messages and admin replies)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
