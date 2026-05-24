@@ -34,6 +34,9 @@ KYIV_TZ = pytz.timezone("Europe/Kyiv")
 # Admin user IDs
 ADMIN_IDS = [260189699, 349776051]
 
+# Store admin reply state: {admin_id: user_id}
+admin_reply_to = {}
+
 db = Database()
 tips = TipsLoader()
 
@@ -363,9 +366,56 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(users_text, parse_mode="Markdown")
 
 
-async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle non-command messages from users and forward to admins."""
+async def admin_reply_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin reply button press."""
+    query = query_update.callback_query
+    await query.answer()
+    
+    admin_id = query.from_user.id
+    
+    # Extract user_id from callback data
+    user_id = int(query.data.split("_")[1])
+    
+    # Get user info
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = f"@{chat.username}" if chat.username else f"ID: {user_id}"
+    except:
+        username = f"ID: {user_id}"
+    
+    # Store user_id in global dict for the reply
+    admin_reply_to[admin_id] = user_id
+    
+    await query.edit_message_text(
+        f"{query.message.text}\n\n"
+        f"💬 Напишіть вашу відповідь для {username}:"
+    )
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle all non-command text messages."""
     user_id = update.effective_user.id
+    
+    # Check if this is an admin replying to a user
+    if user_id in ADMIN_IDS and user_id in admin_reply_to:
+        target_user_id = admin_reply_to[user_id]
+        reply_text = update.message.text
+        
+        # Send reply to user
+        try:
+            await context.bot.send_message(
+                chat_id=target_user_id,
+                text=reply_text
+            )
+            await update.message.reply_text(f"✅ Відповідь надіслано користувачу!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Помилка при відправці: {e}")
+        
+        # Clear the reply state
+        del admin_reply_to[user_id]
+        return
+    
+    # Otherwise, handle as regular user message
     user = db.get_user(user_id)
     
     # Only handle messages from registered users
@@ -403,59 +453,6 @@ async def handle_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE
             )
         except Exception as e:
             logger.error(f"Failed to send message to admin {admin_id}: {e}")
-
-
-async def admin_reply_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle admin reply button press."""
-    query = query_update.callback_query
-    await query.answer()
-    
-    # Extract user_id from callback data
-    user_id = int(query.data.split("_")[1])
-    
-    # Get user info
-    try:
-        chat = await context.bot.get_chat(user_id)
-        username = f"@{chat.username}" if chat.username else f"ID: {user_id}"
-    except:
-        username = f"ID: {user_id}"
-    
-    # Store user_id in context for the reply
-    context.user_data["reply_to_user"] = user_id
-    
-    await query.edit_message_text(
-        f"{query.message.text}\n\n"
-        f"💬 Напишіть вашу відповідь для {username}:"
-    )
-
-
-async def admin_send_reply(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Send admin's reply to the user."""
-    admin_id = update.effective_user.id
-    
-    # Check if this is an admin replying
-    if admin_id not in ADMIN_IDS:
-        return
-    
-    # Check if there's a user to reply to
-    if "reply_to_user" not in context.user_data:
-        return
-    
-    user_id = context.user_data["reply_to_user"]
-    reply_text = update.message.text
-    
-    # Send reply to user
-    try:
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=reply_text
-        )
-        await update.message.reply_text(f"✅ Відповідь надіслано користувачу!")
-    except Exception as e:
-        await update.message.reply_text(f"❌ Помилка при відправці: {e}")
-    
-    # Clear the reply context
-    del context.user_data["reply_to_user"]
 
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -499,9 +496,8 @@ def main():
     # Handle admin reply button
     app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
     
-    # Handle messages from users (forward to admins) and admin replies
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_user_message))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, admin_send_reply))
+    # Handle all non-command text messages (both user messages and admin replies)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Schedule tips every 2 hours for testing
     job_queue = app.job_queue
