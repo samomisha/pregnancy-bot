@@ -326,44 +326,49 @@ async def users_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
-    users = db.get_all_users_with_details()
-    
-    if not users:
-        await update.message.reply_text("Немає зареєстрованих користувачів.")
-        return
-    
-    # Get user info from Telegram
-    users_text = "👥 *Список користувачів:*\n\n"
-    
-    for user_data in users[:50]:  # Limit to 50 users per message
-        user_id_val = user_data["user_id"]
-        current_day = user_data["current_day"]
-        current_week = user_data["current_week"]
-        last_active = user_data["last_active"]
-        status = user_data["status"]
+    try:
+        users = db.get_all_users_with_details()
         
-        # Try to get user info
-        try:
-            chat = await context.bot.get_chat(user_id_val)
-            username = chat.username if chat.username else "—"
-            name = chat.first_name or "—"
-        except:
-            username = "—"
-            name = "—"
+        if not users:
+            await update.message.reply_text("Немає зареєстрованих користувачів.")
+            return
         
-        status_emoji = "✅" if status == "active" else "❌"
-        last_active_str = last_active[:10] if last_active else "—"
+        # Get user info from Telegram
+        users_text = "👥 Список користувачів:\n\n"
         
-        users_text += (
-            f"{status_emoji} *{name}* (@{username})\n"
-            f"   День {current_day} | Тиждень {current_week}\n"
-            f"   Остання активність: {last_active_str}\n\n"
-        )
-    
-    if len(users) > 50:
-        users_text += f"\n_Показано перших 50 з {len(users)} користувачів_"
-    
-    await update.message.reply_text(users_text, parse_mode="Markdown")
+        for user_data in users[:50]:  # Limit to 50 users per message
+            user_id_val = user_data["user_id"]
+            current_day = user_data["current_day"]
+            current_week = user_data["current_week"]
+            last_active = user_data["last_active"]
+            status = user_data["status"]
+            
+            # Try to get user info
+            try:
+                chat = await context.bot.get_chat(user_id_val)
+                username = f"@{chat.username}" if chat.username else "—"
+                name = chat.first_name or "—"
+            except Exception as e:
+                logger.error(f"Failed to get chat info for {user_id_val}: {e}")
+                username = "—"
+                name = "—"
+            
+            status_emoji = "✅" if status == "active" else "❌"
+            last_active_str = last_active[:10] if last_active else "—"
+            
+            users_text += (
+                f"{status_emoji} {name} ({username})\n"
+                f"   День {current_day} | Тиждень {current_week}\n"
+                f"   Остання активність: {last_active_str}\n\n"
+            )
+        
+        if len(users) > 50:
+            users_text += f"\nПоказано перших 50 з {len(users)} користувачів"
+        
+        await update.message.reply_text(users_text)
+    except Exception as e:
+        logger.error(f"Error in users_command: {e}")
+        await update.message.reply_text(f"❌ Помилка при отриманні списку користувачів: {e}")
 
 
 async def admin_reply_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
