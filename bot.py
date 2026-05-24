@@ -386,9 +386,10 @@ async def admin_reply_callback(query_update: Update, context: ContextTypes.DEFAU
     # Store user_id in global dict for the reply
     admin_reply_to[admin_id] = user_id
     
-    await query.edit_message_text(
-        f"{query.message.text}\n\n"
-        f"💬 Напишіть вашу відповідь для {username}:"
+    # Send a new message instead of editing (to keep the button)
+    await context.bot.send_message(
+        chat_id=admin_id,
+        text=f"💬 Напишіть вашу відповідь для {username}:"
     )
 
 
@@ -401,11 +402,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         target_user_id = admin_reply_to[user_id]
         reply_text = update.message.text
         
-        # Send reply to user
+        # Send reply to user with signature
         try:
             await context.bot.send_message(
                 chat_id=target_user_id,
-                text=reply_text
+                text=f"{reply_text}\n\n— команда бота 🌸"
             )
             await update.message.reply_text(f"✅ Відповідь надіслано користувачу!")
         except Exception as e:
