@@ -1,6 +1,6 @@
 import logging
 import os
-from datetime import time
+from datetime import time, datetime
 import pytz
 
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
@@ -22,6 +22,14 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+
+# Bot version information
+VERSION = "1.0.0"
+LAST_UPDATE = "26.05.2026"
+CHANGELOG = "перший реліз — реєстрація, розсилка порад, адмін-панель, Google Sheets, PostgreSQL"
+
+# Bot start time for uptime tracking
+bot_start_time = None
 
 # Conversation states
 ASK_DAY = 0
@@ -485,6 +493,34 @@ async def notify_admins_running(context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send running notification to admin {admin_id}: {e}")
 
 
+async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show bot status (admin only)."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    # Calculate uptime
+    if bot_start_time:
+        uptime_delta = datetime.now() - bot_start_time
+        hours = uptime_delta.seconds // 3600
+        minutes = (uptime_delta.seconds % 3600) // 60
+        uptime_str = f"{uptime_delta.days * 24 + hours} годин {minutes} хвилин"
+    else:
+        uptime_str = "невідомо"
+    
+    status_text = (
+        f"⚙️ Статус бота\n\n"
+        f"📦 Версія: {VERSION}\n"
+        f"📅 Останнє оновлення: {LAST_UPDATE}\n"
+        f"📝 Що нового: {CHANGELOG}\n\n"
+        f"⏱ Працює: {uptime_str}"
+    )
+    
+    await update.message.reply_text(status_text)
+
+
 async def reload_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Reload tips from Google Sheets (admin only)."""
     user_id = update.effective_user.id
@@ -596,6 +632,9 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 def main():
+    global bot_start_time
+    bot_start_time = datetime.now()
+    
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise ValueError("BOT_TOKEN environment variable is not set!")
@@ -627,6 +666,7 @@ def main():
     app.add_handler(CommandHandler("stop", stop_command))
     app.add_handler(CommandHandler("stats", stats_command))
     app.add_handler(CommandHandler("users", users_command))
+    app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("reload", reload_command))
     app.add_handler(CommandHandler("maintenance", maintenance_command))
     # Handle admin reply button
