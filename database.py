@@ -109,6 +109,9 @@ class Database:
 
     def get_current_day(self, user_id: int) -> int:
         """Calculate current pregnancy day for user (TEST MODE: every 2 hours = +1 day)."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
         user = self.get_user(user_id)
         if not user:
             return 0
@@ -125,14 +128,31 @@ class Database:
             return 0
             
         registered_at = rows[0][0]
+        now_utc = datetime.utcnow()
         
-        # Calculate hours since registration
-        hours_since_registration = (datetime.utcnow() - registered_at).total_seconds() / 3600
+        # Calculate time difference
+        time_diff = now_utc - registered_at
+        seconds_since_registration = time_diff.total_seconds()
+        hours_since_registration = seconds_since_registration / 3600
         
         # Every 2 hours = +1 day (test mode)
         days_since_registration = int(hours_since_registration / 2)
         
         current_day = user["start_day"] + days_since_registration
+        
+        # Detailed logging
+        logger.info(
+            f"get_current_day for user {user_id}:\n"
+            f"  registered_at (from DB): {registered_at}\n"
+            f"  now_utc: {now_utc}\n"
+            f"  time_diff: {time_diff}\n"
+            f"  seconds_since_registration: {seconds_since_registration}\n"
+            f"  hours_since_registration: {hours_since_registration}\n"
+            f"  days_since_registration (hours/2): {days_since_registration}\n"
+            f"  start_day: {user['start_day']}\n"
+            f"  current_day (start_day + days_since_reg): {current_day}"
+        )
+        
         return current_day
     
     def update_last_active(self, user_id: int):
