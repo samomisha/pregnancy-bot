@@ -1,7 +1,9 @@
 import logging
 import os
+import asyncio
 from datetime import time, datetime
 import pytz
+from aiohttp import web
 
 from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -16,6 +18,7 @@ from telegram.ext import (
 
 from database import Database
 from tips import TipsLoader
+import zenedu_webhook
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -722,7 +725,19 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return ConversationHandler.END
 
 
-def main():
+async def run_webhook_server():
+    """Run the aiohttp webhook server."""
+    port = int(os.environ.get("PORT", 8080))
+    webhook_app = await zenedu_webhook.create_webhook_app()
+    runner = web.AppRunner(webhook_app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    logger.info(f"Webhook server started on port {port}")
+
+
+async def main_async():
+    """Main async function to run both bot and webhook server."""
     global bot_start_time
     bot_start_time = datetime.now()
     
@@ -735,6 +750,10 @@ def main():
     logger.info(f"Loaded tips for {len(tips.data)} days")
 
     app = Application.builder().token(token).build()
+    
+    # Set bot application and watchmode_admins in webhook module
+    zenedu_webhook.bot_application = app
+    zenedu_webhook.watchmode_admins = watchmode_admins
 
     conv_handler = ConversationHandler(
         entry_points=[
@@ -782,7 +801,23 @@ def main():
     job_queue.run_once(notify_admins_running, when=60)  # After 1 minute
 
     logger.info("Bot started!")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    
+    # Start webhook server
+    await run_webhook_server()
+    
+    # Initialize and run the bot
+    async with app:
+        await app.initialize()
+        await app.start()
+        await app.updater.start_polling(allowed_updates=Update.ALL_TYPES)
+        
+        # Keep running
+        await asyncio.Event().wait()
+
+
+def main():
+    """Entry point."""
+    asyncio.run(main_async())
 
 
 if __name__ == "__main__":

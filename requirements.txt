@@ -3,3 +3,4 @@ gspread==6.1.2
 google-auth==2.35.0
 pg8000==1.31.2
 pytz==2024.2
+aiohttp==3.9.1
