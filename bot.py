@@ -45,6 +45,9 @@ ADMIN_IDS = [260189699, 349776051]
 # Store admin reply state: {admin_id: user_id}
 admin_reply_to = {}
 
+# Watchmode state: set of admin IDs with watchmode enabled
+watchmode_admins = set()
+
 db = Database()
 tips = TipsLoader()
 
@@ -61,6 +64,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Якщо хочеш змінити термін — напиши /restart\n"
             "Якщо хочеш відписатися — напиши /stop"
         )
+        await log_user_action(context, user_id, "/start (вже зареєстрована)")
         return ConversationHandler.END
 
     # Show inline buttons for week or day selection
@@ -78,6 +82,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Підкажи на якому ти етапі 🌸 Зазвичай достатньо вказати тиждень — але якщо знаєш точний день, можеш одразу його ввести!",
         reply_markup=reply_markup
     )
+    await log_user_action(context, user_id, "/start (нова реєстрація)")
     return ASK_DAY
 
 
@@ -111,17 +116,21 @@ async def button_callback(query_update: Update, context: ContextTypes.DEFAULT_TY
     query = query_update.callback_query
     await query.answer()
     
+    user_id = query.from_user.id
+    
     if query.data == "input_week":
         await query.edit_message_text(
             "📅 Чудово! Напиши номер тижня від 1 до 40:"
         )
         context.user_data["input_mode"] = "week"
+        await log_user_action(context, user_id, "кнопка: 📅 Ввести тиждень")
         return ASK_WEEK
     elif query.data == "input_day":
         await query.edit_message_text(
             "🗓 Чудово! Напиши день вагітності від 1 до 280:"
         )
         context.user_data["input_mode"] = "day"
+        await log_user_action(context, user_id, "кнопка: 🗓 Ввести точний день")
         return ASK_DAY
 
 
@@ -195,10 +204,12 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"На {current_day}-й день у мене немає порад, але я тут! 💛\n"
             "Завтра обов'язково буде щось корисне."
         )
+    
+    await log_user_action(context, user_id, "/today")
 
 
 async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show debug information: current day and all available days."""
+    """Show debug information: send technical data to admins."""
     user_id = update.effective_user.id
     user = db.get_user(user_id)
 
@@ -223,16 +234,37 @@ async def debug_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         days_str = "немає"
         total_tips = 0
     
+    # Get user info
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = chat.username if chat.username else "немає"
+    except:
+        username = "немає"
+    
+    # Send technical data to admins
     debug_info = (
-        f"🔍 *Debug Information*\n\n"
+        f"🔧 Debug від @{username} (ID: {user_id})\n\n"
         f"👤 User ID: `{user_id}`\n"
-        f"📅 Поточний день: *{current_day}* (тиждень {current_week})\n"
-        f"📊 Всього днів з порадами: *{len(available_days)}*\n"
-        f"💡 Всього порад: *{total_tips}*\n\n"
+        f"👤 Username: @{username}\n"
+        f" Поточний день: *{current_day}*\n"
+        f"📅 Поточний тиждень: *{current_week}*\n"
+        f"📊 Start day: *{user.get('start_day', 'N/A')}*\n"
+        f"💡 Кількість порад в базі: *{total_tips}*\n\n"
         f"📋 Дні з порадами:\n`{days_str}`"
     )
     
-    await update.message.reply_text(debug_info, parse_mode="Markdown")
+    for admin_id in ADMIN_IDS:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=debug_info,
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.error(f"Failed to send debug info to admin {admin_id}: {e}")
+    
+    # Reply to user
+    await update.message.reply_text("Щоб твій ботик працював чудово — всі технічні дані відправили адміну 🌸")
 
 
 async def send_tips(chat_id, day, day_tips, context):
@@ -449,6 +481,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     current_day = db.get_current_day(user_id)
     message_text = update.message.text
     
+    # Log user message for watchmode
+    text_preview = message_text[:50] if len(message_text) > 50 else message_text
+    await log_user_action(context, user_id, f"повідомлення: {text_preview}")
+    
     # Forward to admins with reply button
     keyboard = [[InlineKeyboardButton("💬 Відповісти", callback_data=f"reply_{user_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
@@ -626,6 +662,58 @@ async def maintenance_confirm_callback(query_update: Update, context: ContextTyp
     )
 
 
+async def watchmode_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Toggle watchmode for admins to monitor user actions."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    # Toggle watchmode
+    if user_id in watchmode_admins:
+        watchmode_admins.remove(user_id)
+        await update.message.reply_text("👁 Watchmode вимкнено")
+    else:
+        watchmode_admins.add(user_id)
+        await update.message.reply_text("👁 Watchmode увімкнено. Ти будеш отримувати лог всіх дій користувачів в реальному часі.")
+
+
+async def log_user_action(context: ContextTypes.DEFAULT_TYPE, user_id: int, action: str):
+    """Log user action to admins with watchmode enabled."""
+    if not watchmode_admins:
+        return
+    
+    # Don't log admin actions
+    if user_id in ADMIN_IDS:
+        return
+    
+    # Get user info
+    user = db.get_user(user_id)
+    if not user:
+        return
+    
+    current_day = db.get_current_day(user_id)
+    current_week = (current_day - 1) // 7 + 1
+    
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = chat.username if chat.username else f"ID_{user_id}"
+    except:
+        username = f"ID_{user_id}"
+    
+    log_message = f"👁 @{username} (день {current_day}, тиж {current_week}): {action}"
+    
+    for admin_id in watchmode_admins:
+        try:
+            await context.bot.send_message(
+                chat_id=admin_id,
+                text=log_message
+            )
+        except Exception as e:
+            logger.error(f"Failed to send watchmode log to admin {admin_id}: {e}")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -669,6 +757,7 @@ def main():
     app.add_handler(CommandHandler("status", status_command))
     app.add_handler(CommandHandler("reload", reload_command))
     app.add_handler(CommandHandler("maintenance", maintenance_command))
+    app.add_handler(CommandHandler("watchmode", watchmode_command))
     # Handle admin reply button
     app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
     app.add_handler(CallbackQueryHandler(maintenance_confirm_callback, pattern="^maintenance_confirm$"))
