@@ -179,6 +179,7 @@ async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Підкажи на якому ти етапі 🌸 Зазвичай достатньо вказати тиждень — але якщо знаєш точний день, можеш одразу його ввести!",
         reply_markup=reply_markup
     )
+    await log_user_action(context, user_id, "/restart")
     return ASK_DAY
 
 
@@ -328,6 +329,8 @@ async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "😔 Ти відписалася від щоденних порад.\n\n"
         "Якщо захочеш повернутися — просто напиши /start"
     )
+    
+    await log_user_action(context, user_id, "/stop")
 
 
 async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
