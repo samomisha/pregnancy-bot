@@ -68,6 +68,11 @@ async def process_subscription_event(payload, event_name):
                         subscription_status='active',
                         subscription_end_date=None
                     )
+                    
+                    # Track first payment and add event
+                    db.set_first_paid(user_id)
+                    db.add_subscription_event(user_id, 'activated')
+                    
                     logger.info(f"Activated subscription for user {user_id}, subscriber_id {subscriber_id}")
                     
                     # Send welcome message to user
@@ -94,6 +99,7 @@ async def process_subscription_event(payload, event_name):
             if status == "paid" and order_type == "subscription_renew":
                 subscriber = data.get("subscriber", {})
                 user_id = subscriber.get("user_id")
+                price = data.get("price")
                 
                 if user_id:
                     user = db.get_user(user_id)
@@ -103,7 +109,11 @@ async def process_subscription_event(payload, event_name):
                             subscription_status='active',
                             subscription_end_date=None
                         )
-                        logger.info(f"Renewed subscription for user {user_id}")
+                        
+                        # Add renewal event with amount
+                        db.add_subscription_event(user_id, 'renewed', amount=price)
+                        
+                        logger.info(f"Renewed subscription for user {user_id}, amount {price}")
                     else:
                         logger.warning(f"User {user_id} not found in database, ignoring renewal event")
         
@@ -132,6 +142,10 @@ async def process_subscription_event(payload, event_name):
                         subscription_status='cancelled',
                         subscription_end_date=end_date
                     )
+                    
+                    # Add cancellation event
+                    db.add_subscription_event(user_id, 'cancelled')
+                    
                     logger.info(f"Cancelled subscription for user {user_id}, expires at {expired_at}")
                     
                     # Send notification to user

@@ -110,6 +110,9 @@ async def receive_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Set trial start for new users
     db.set_trial_start(user_id)
+    
+    # Track term entered for analytics
+    db.set_term_entered(user_id)
 
     week = (day - 1) // 7 + 1
     
@@ -186,6 +189,9 @@ async def receive_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Set trial start for new users
     db.set_trial_start(user_id)
+    
+    # Track term entered for analytics
+    db.set_term_entered(user_id)
     
     # Send today's tip + offer in one message
     current_day = db.get_current_day(user_id)
