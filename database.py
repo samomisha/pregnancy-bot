@@ -44,6 +44,11 @@ class Database:
         try:
             conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS status VARCHAR(20) DEFAULT 'active'")
             conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_active TIMESTAMP")
+            # New subscription-related columns
+            conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS zenedu_subscriber_id INTEGER")
+            conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20)")
+            conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_end_date TIMESTAMP")
+            conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_start DATE")
         except:
             pass
         conn.close()
@@ -281,3 +286,75 @@ class Database:
             })
         
         return users
+    
+    # Subscription management methods
+    
+    def set_trial_start(self, user_id: int, trial_date: date = None):
+        """Set trial_start date for user."""
+        if trial_date is None:
+            trial_date = date.today()
+        conn = self._get_conn()
+        conn.run(
+            "UPDATE users SET trial_start = :trial_start WHERE user_id = :user_id",
+            trial_start=trial_date, user_id=user_id
+        )
+        conn.close()
+    
+    def update_subscription(self, user_id: int, zenedu_subscriber_id: int = None, 
+                          subscription_status: str = None, subscription_end_date: datetime = None):
+        """Update subscription information for user."""
+        conn = self._get_conn()
+        
+        updates = []
+        params = {"user_id": user_id}
+        
+        if zenedu_subscriber_id is not None:
+            updates.append("zenedu_subscriber_id = :zenedu_subscriber_id")
+            params["zenedu_subscriber_id"] = zenedu_subscriber_id
+        
+        if subscription_status is not None:
+            updates.append("subscription_status = :subscription_status")
+            params["subscription_status"] = subscription_status
+        
+        if subscription_end_date is not None:
+            updates.append("subscription_end_date = :subscription_end_date")
+            params["subscription_end_date"] = subscription_end_date
+        
+        if updates:
+            query = f"UPDATE users SET {', '.join(updates)} WHERE user_id = :user_id"
+            conn.run(query, **params)
+        
+        conn.close()
+    
+    def get_user_subscription(self, user_id: int):
+        """Get user subscription details."""
+        conn = self._get_conn()
+        rows = conn.run(
+            """SELECT zenedu_subscriber_id, subscription_status, subscription_end_date, trial_start 
+               FROM users WHERE user_id = :user_id""",
+            user_id=user_id
+        )
+        conn.close()
+        
+        if rows:
+            row = rows[0]
+            return {
+                "zenedu_subscriber_id": row[0],
+                "subscription_status": row[1],
+                "subscription_end_date": row[2],
+                "trial_start": row[3]
+            }
+        return None
+    
+    def find_user_by_zenedu_id(self, zenedu_subscriber_id: int):
+        """Find user by Zenedu subscriber ID."""
+        conn = self._get_conn()
+        rows = conn.run(
+            "SELECT user_id FROM users WHERE zenedu_subscriber_id = :zenedu_subscriber_id",
+            zenedu_subscriber_id=zenedu_subscriber_id
+        )
+        conn.close()
+        
+        if rows:
+            return rows[0][0]
+        return None
