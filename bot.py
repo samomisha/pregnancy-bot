@@ -1021,8 +1021,8 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
         # Escape special characters for HTML
         name_escaped = html.escape(name)
         
-        # Get ZENEDU_BOT_ID from environment
-        zenedu_bot_id = os.environ.get("ZENEDU_BOT_ID", "")
+        # Get ZENEDU_BOT_ID from environment (temporary hardcode for diagnostics)
+        zenedu_bot_id = os.environ.get("ZENEDU_BOT_ID") or "7836"
         
         # Format timestamp
         timestamp = datetime.now(KYIV_TZ).strftime("%d.%m.%Y %H:%M")
