@@ -27,7 +27,12 @@ ONBOARDING_BUTTON_URL = "https://app.zenedu.io/l/x6PTPdiqsZpglKGo"
 
 # Trial messages
 def trial_days_left(days_left):
-    return f"Залишилось {days_left} днів безкоштовного доступу 🌸"
+    if days_left == 1:
+        return "Залишився 1 день безкоштовного доступу 🌸"
+    elif days_left in [2, 3, 4]:
+        return f"Залишилось {days_left} дні безкоштовного доступу 🌸"
+    else:
+        return f"Залишилось {days_left} днів безкоштовного доступу 🌸"
 
 TRIAL_LAST_DAY = "Це остання безкоштовна порада 🌸"
 
