@@ -254,10 +254,11 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     db.update_last_active(user_id)
     current_day = db.get_current_day(user_id)
     
-    # Get subscription info for logging
+    # Get subscription info
     sub_info = db.get_user_subscription(user_id)
     subscription_status = sub_info.get("subscription_status") if sub_info else None
     trial_start = sub_info.get("trial_start") if sub_info else None
+    subscription_end_date = sub_info.get("subscription_end_date") if sub_info else None
     
     # Calculate trial day if applicable
     trial_day = None
@@ -273,14 +274,75 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     
     day_tips = tips.get_tips_for_day(current_day)
-
-    if day_tips:
-        await send_tips(update.message.chat_id, current_day, day_tips, context)
+    
+    # Check subscription status and trial
+    # Active subscription - send tips
+    if subscription_status == 'active':
+        if day_tips:
+            await send_tips(update.message.chat_id, current_day, day_tips, context)
+        else:
+            await update.message.reply_text(
+                f"На {current_day}-й день у мене немає порад, але я тут! 💛\n"
+                "Завтра обов'язково буде щось корисне."
+            )
+    
+    # Trial user (subscription_status is NULL or empty string)
+    elif (subscription_status is None or subscription_status == '') and trial_start:
+        if trial_day <= 5:
+            # Days 1-5: send tip + trial message
+            if day_tips:
+                await send_tips(update.message.chat_id, current_day, day_tips, context)
+                
+                if trial_day <= 4:
+                    days_left = 5 - trial_day
+                    trial_msg = msg.trial_days_left(days_left)
+                else:
+                    trial_msg = msg.TRIAL_LAST_DAY
+                
+                keyboard = [[InlineKeyboardButton(msg.SUBSCRIBE_BUTTON_TEXT, url=msg.SUBSCRIBE_BUTTON_URL)]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=trial_msg,
+                    reply_markup=reply_markup
+                )
+        else:
+            # Day 6+: trial ended, don't send tip
+            keyboard = [[InlineKeyboardButton(msg.SUBSCRIBE_BUTTON_TEXT, url=msg.SUBSCRIBE_BUTTON_URL)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=msg.TRIAL_ENDED,
+                reply_markup=reply_markup
+            )
+    
+    # Cancelled subscription
+    elif subscription_status == 'cancelled':
+        today = datetime.utcnow()
+        
+        if subscription_end_date and today < subscription_end_date:
+            # Still have access - send tips
+            if day_tips:
+                await send_tips(update.message.chat_id, current_day, day_tips, context)
+        else:
+            # Access ended
+            keyboard = [[InlineKeyboardButton(msg.RENEW_BUTTON_TEXT, url=msg.RENEW_BUTTON_URL)]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await context.bot.send_message(
+                chat_id=user_id,
+                text=msg.SUBSCRIPTION_ENDED,
+                reply_markup=reply_markup
+            )
+    
+    # Old users without trial_start - send tips normally
     else:
-        await update.message.reply_text(
-            f"На {current_day}-й день у мене немає порад, але я тут! 💛\n"
-            "Завтра обов'язково буде щось корисне."
-        )
+        if day_tips:
+            await send_tips(update.message.chat_id, current_day, day_tips, context)
+        else:
+            await update.message.reply_text(
+                f"На {current_day}-й день у мене немає порад, але я тут! 💛\n"
+                "Завтра обов'язково буде щось корисне."
+            )
     
     await log_user_action(context, user_id, "/today")
 
