@@ -1054,7 +1054,8 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
                 await context.bot.send_message(
                     chat_id=admin_id,
                     text=admin_notification,
-                    parse_mode="HTML"
+                    parse_mode="HTML",
+                    disable_web_page_preview=True
                 )
             except Exception as e:
                 logger.error(f"Failed to send unsubscribe notification to admin {admin_id}: {e}")
