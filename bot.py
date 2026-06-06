@@ -574,22 +574,47 @@ async def stats_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("У тебе немає доступу до цієї команди.")
         return
     
-    stats = db.get_stats()
-    trimester_dist = db.get_trimester_distribution()
+    # Get analytics stats
+    analytics = db.get_analytics_stats()
     
-    stats_text = (
-        f"📊 *Статистика бота*\n\n"
-        f"👥 Всього користувачів: *{stats['total_users']}*\n"
-        f"✅ Активних: *{stats['active_users']}*\n\n"
-        f"📈 Нових за 7 днів: *{stats['new_7_days']}*\n"
-        f"📈 Нових за 30 днів: *{stats['new_30_days']}*\n\n"
-        f"📉 Відписок за 7 днів: *{stats['unsub_7_days']}*\n"
-        f"📉 Відписок за 30 днів: *{stats['unsub_30_days']}*\n\n"
-        f"🤰 *Розподіл по триместрах:*\n"
-        f"1-й триместр (1-12 тижнів): *{trimester_dist[1]}*\n"
-        f"2-й триместр (13-28 тижнів): *{trimester_dist[2]}*\n"
-        f"3-й триместр (29-40 тижнів): *{trimester_dist[3]}*"
+    # Build funnel section
+    funnel = analytics['funnel']
+    funnel_text = (
+        f"📊 *ВОРОНКА*\n\n"
+        f"Всього зареєструвались: *{funnel['total_registered']}*\n"
+        f"Ввели термін: *{funnel['entered_term']}* ({funnel['conv_term']}%)\n"
+        f"Почали тріал: *{funnel['started_trial']}* ({funnel['conv_trial']}%)\n"
+        f"Купили підписку: *{funnel['first_paid']}* ({funnel['conv_paid']}%)\n"
     )
+    
+    # Build subscriptions section
+    subs = analytics['subscriptions']
+    subs_text = (
+        f"\n💳 *ПІДПИСКИ*\n\n"
+        f"Активні зараз: *{subs['active']}*\n"
+        f"MRR: *{subs['mrr']} грн*\n"
+        f"Всього купило коли-небудь: *{subs['total_ever_paid']}*\n"
+    )
+    
+    # Build activity section
+    activity = analytics['activity']
+    activity_text = (
+        f"\n📱 *АКТИВНІСТЬ*\n\n"
+        f"WAU (активні за 7 днів): *{activity['wau']}*\n"
+    )
+    
+    # Build retention section
+    retention = analytics['retention']
+    retention_text = f"\n🔄 *RETENTION*\n\n"
+    
+    for month in [1, 2, 3, 4]:
+        month_key = f"month_{month}"
+        if month_key in retention:
+            r = retention[month_key]
+            retention_text += f"Місяць {month}: *{r['still_paying']}/{r['eligible']}* ({r['percentage']}%)\n"
+    
+    # Combine all sections
+    stats_text = funnel_text + subs_text + activity_text + retention_text
     
     await update.message.reply_text(stats_text, parse_mode="Markdown")
 
