@@ -815,29 +815,27 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Log voice message for watchmode
     await log_user_action(context, user_id, "голосове повідомлення")
     
-    # Forward voice to admins with info message and reply button
+    # Send voice to admins with caption and reply button
     keyboard = [[InlineKeyboardButton("💬 Відповісти", callback_data=f"reply_{user_id}")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
+    # Get voice file_id
+    voice_file_id = update.message.voice.file_id
+    
+    # Create caption with user info
+    caption = f"🎤 Голосове від {name} | @{username} | ID: {user_id}"
+    
     for admin_id in ADMIN_IDS:
         try:
-            # Forward the voice message
-            await context.bot.forward_message(
+            # Send voice with caption and reply button
+            await context.bot.send_voice(
                 chat_id=admin_id,
-                from_chat_id=user_id,
-                message_id=update.message.message_id
-            )
-            
-            # Send info message with reply button
-            info_message = f"🎤 Голосове від [{name}]({user_link}) | @{username} | ID: {user_id}"
-            await context.bot.send_message(
-                chat_id=admin_id,
-                text=info_message,
-                parse_mode="Markdown",
+                voice=voice_file_id,
+                caption=caption,
                 reply_markup=reply_markup
             )
         except Exception as e:
-            logger.error(f"Failed to forward voice to admin {admin_id}: {e}")
+            logger.error(f"Failed to send voice to admin {admin_id}: {e}")
 
 
 async def notify_admins_startup(context: ContextTypes.DEFAULT_TYPE):
