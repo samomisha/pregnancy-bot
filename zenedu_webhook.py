@@ -1,7 +1,8 @@
 import json
 import logging
+import os
 from aiohttp import web
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -9,6 +10,13 @@ logger = logging.getLogger(__name__)
 bot_application = None
 watchmode_admins = None
 db = None
+
+# Stats cache
+stats_cache = {
+    "data": None,
+    "generated_at": None
+}
+CACHE_DURATION = timedelta(hours=1)
 
 
 async def handle_zenedu_webhook(request):
@@ -176,8 +184,78 @@ async def process_subscription_event(payload, event_name):
         logger.error(f"Error processing subscription event: {e}")
 
 
+async def handle_stats(request):
+    """Handle stats API endpoint with token authentication and caching."""
+    try:
+        # Check token
+        token = request.query.get('token')
+        expected_token = os.environ.get('STATS_TOKEN')
+        
+        if not expected_token:
+            logger.error("STATS_TOKEN environment variable not set")
+            return web.json_response({"error": "Stats endpoint not configured"}, status=500)
+        
+        if token != expected_token:
+            logger.warning(f"Invalid stats token attempt: {token}")
+            return web.json_response({"error": "Unauthorized"}, status=401)
+        
+        # Check cache
+        now = datetime.utcnow()
+        if stats_cache["data"] and stats_cache["generated_at"]:
+            cache_age = now - stats_cache["generated_at"]
+            if cache_age < CACHE_DURATION:
+                logger.info(f"Returning cached stats (age: {cache_age.total_seconds():.0f}s)")
+                return web.json_response(stats_cache["data"])
+        
+        # Generate fresh stats
+        if not db:
+            return web.json_response({"error": "Database not available"}, status=500)
+        
+        logger.info("Generating fresh stats")
+        analytics = db.get_analytics_stats()
+        
+        # Build response
+        response_data = {
+            "funnel": {
+                "total_users": analytics['funnel']['total_registered'],
+                "term_entered": analytics['funnel']['entered_term'],
+                "trial_started": analytics['funnel']['started_trial'],
+                "paid": analytics['funnel']['first_paid'],
+                "conv_term_pct": analytics['funnel']['conv_term'],
+                "conv_trial_pct": analytics['funnel']['conv_trial'],
+                "conv_paid_pct": analytics['funnel']['conv_paid']
+            },
+            "subscriptions": {
+                "active_subscriptions": analytics['subscriptions']['active'],
+                "mrr": analytics['subscriptions']['mrr'],
+                "total_paid": analytics['subscriptions']['total_ever_paid']
+            },
+            "activity": {
+                "wau": analytics['activity']['wau']
+            },
+            "retention": {
+                "month_1": analytics['retention'].get('month_1', {}),
+                "month_2": analytics['retention'].get('month_2', {}),
+                "month_3": analytics['retention'].get('month_3', {}),
+                "month_4": analytics['retention'].get('month_4', {})
+            },
+            "generated_at": now.isoformat() + "Z"
+        }
+        
+        # Update cache
+        stats_cache["data"] = response_data
+        stats_cache["generated_at"] = now
+        
+        return web.json_response(response_data)
+        
+    except Exception as e:
+        logger.error(f"Error handling stats request: {e}")
+        return web.json_response({"error": str(e)}, status=500)
+
+
 async def create_webhook_app():
     """Create and configure the aiohttp application."""
     app = web.Application()
     app.router.add_post('/webhook/zenedu', handle_zenedu_webhook)
+    app.router.add_get('/api/stats', handle_stats)
     return app
