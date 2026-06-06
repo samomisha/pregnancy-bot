@@ -1027,6 +1027,9 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
         # Format timestamp
         timestamp = datetime.now(KYIV_TZ).strftime("%d.%m.%Y %H:%M")
         
+        # Debug logging
+        logger.info(f"Unsubscribe notification: user_id={user_id}, zenedu_subscriber_id={zenedu_subscriber_id}, zenedu_bot_id={zenedu_bot_id}")
+        
         # Build admin notification with HTML and clickable link
         if zenedu_subscriber_id and zenedu_bot_id:
             subscriber_link = f"https://app.zenedu.io/bot/{zenedu_bot_id}/subscribers/{zenedu_subscriber_id}"
@@ -1036,6 +1039,7 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
                 f"📱 @{username} | ID: {user_id}\n"
                 f"📅 {timestamp}"
             )
+            logger.info(f"Admin notification with link: {admin_notification}")
         else:
             admin_notification = (
                 f"🔔 Запит на скасування підписки\n\n"
@@ -1043,6 +1047,7 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
                 f"📱 @{username} | ID: {user_id}\n"
                 f"📅 {timestamp}"
             )
+            logger.info(f"Admin notification without link (missing data): {admin_notification}")
         
         for admin_id in ADMIN_IDS:
             try:
