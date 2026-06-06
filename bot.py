@@ -1,7 +1,7 @@
 import logging
 import os
 import asyncio
-from datetime import time, datetime
+from datetime import time, datetime, timedelta
 import pytz
 from aiohttp import web
 
@@ -1054,12 +1054,26 @@ async def main_async():
 
     # Schedule tips every 2 hours (test mode: 2 hours = 1 day)
     job_queue = app.job_queue
+    
+    # Calculate time until next scheduled run (e.g., 9:00 AM Kyiv time)
+    now = datetime.now(KYIV_TZ)
+    target_time = now.replace(hour=9, minute=0, second=0, microsecond=0)
+    
+    # If we've passed 9 AM today, schedule for tomorrow
+    if now.time() >= time(9, 0):
+        target_time += timedelta(days=1)
+    
+    # Calculate seconds until target time
+    time_until_first = (target_time - now).total_seconds()
+    
     job_queue.run_repeating(
         send_daily_tips,
-        interval=7200,  # 2 hours in seconds
-        first=10,  # Start after 10 seconds
+        interval=7200,  # 2 hours in seconds (test mode)
+        first=time_until_first,  # Wait until scheduled time
         name="tips_every_2_hours"
     )
+    
+    logger.info(f"Scheduled daily tips to start at {target_time.strftime('%Y-%m-%d %H:%M:%S %Z')}")
     
     # Notify admins on startup
     job_queue.run_once(notify_admins_startup, when=1)  # Immediately after startup
