@@ -113,23 +113,30 @@ async def receive_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     week = (day - 1) // 7 + 1
     
-    # Send confirmation
-    await update.message.reply_text(msg.onboarding_confirmation(day, week))
-    
-    # Send today's tip + offer
+    # Send today's tip + offer in one message
     current_day = db.get_current_day(user_id)
     day_tips = tips.get_tips_for_day(current_day)
     
     if day_tips:
-        # Send tips
-        await send_tips(user_id, current_day, day_tips, context)
+        # Build combined message: tip + offer
+        combined_text = f"🌸 *День {current_day} | Тиждень {week}*\n\n"
         
-        # Send offer with button
+        # Add tip content
+        for tip in day_tips:
+            if tip.get("title"):
+                combined_text += f"*{tip['title']}*\n\n"
+            combined_text += tip["text"] + "\n\n"
+        
+        # Add offer text
+        combined_text += msg.ONBOARDING_OFFER
+        
+        # Send combined message with button
         keyboard = [[InlineKeyboardButton(msg.ONBOARDING_BUTTON_TEXT, url=msg.ONBOARDING_BUTTON_URL)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(
             chat_id=user_id,
-            text=msg.ONBOARDING_OFFER,
+            text=combined_text,
+            parse_mode="Markdown",
             reply_markup=reply_markup
         )
     
@@ -180,23 +187,30 @@ async def receive_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Set trial start for new users
     db.set_trial_start(user_id)
     
-    # Send confirmation
-    await update.message.reply_text(msg.onboarding_confirmation(day, week))
-    
-    # Send today's tip + offer
+    # Send today's tip + offer in one message
     current_day = db.get_current_day(user_id)
     day_tips = tips.get_tips_for_day(current_day)
     
     if day_tips:
-        # Send tips
-        await send_tips(user_id, current_day, day_tips, context)
+        # Build combined message: tip + offer
+        combined_text = f"🌸 *День {current_day} | Тиждень {week}*\n\n"
         
-        # Send offer with button
+        # Add tip content
+        for tip in day_tips:
+            if tip.get("title"):
+                combined_text += f"*{tip['title']}*\n\n"
+            combined_text += tip["text"] + "\n\n"
+        
+        # Add offer text
+        combined_text += msg.ONBOARDING_OFFER
+        
+        # Send combined message with button
         keyboard = [[InlineKeyboardButton(msg.ONBOARDING_BUTTON_TEXT, url=msg.ONBOARDING_BUTTON_URL)]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await context.bot.send_message(
             chat_id=user_id,
-            text=msg.ONBOARDING_OFFER,
+            text=combined_text,
+            parse_mode="Markdown",
             reply_markup=reply_markup
         )
     
