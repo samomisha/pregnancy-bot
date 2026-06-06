@@ -19,6 +19,8 @@ from telegram.ext import (
 from database import Database
 from tips import TipsLoader
 import zenedu_webhook
+import messages as msg
+from datetime import date
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -104,13 +106,32 @@ async def receive_day(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     user_id = update.effective_user.id
     db.save_user(user_id, day)
+    
+    # Set trial start for new users
+    db.set_trial_start(user_id)
 
     week = (day - 1) // 7 + 1
-    await update.message.reply_text(
-        f"✅ Чудово! Я запам'ятала, що ти на {day}-му дні ({week}-й тиждень).\n\n"
-        f"Щодня о 9:00 ранку тобі приходитиме порада 💛\n\n"
-        f"Напиши /today щоб отримати сьогоднішню пораду прямо зараз!"
-    )
+    
+    # Send confirmation
+    await update.message.reply_text(msg.onboarding_confirmation(day, week))
+    
+    # Send today's tip + offer
+    current_day = db.get_current_day(user_id)
+    day_tips = tips.get_tips_for_day(current_day)
+    
+    if day_tips:
+        # Send tips
+        await send_tips(user_id, current_day, day_tips, context)
+        
+        # Send offer with button
+        keyboard = [[InlineKeyboardButton(msg.ONBOARDING_BUTTON_TEXT, url=msg.ONBOARDING_BUTTON_URL)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=msg.ONBOARDING_OFFER,
+            reply_markup=reply_markup
+        )
+    
     return ConversationHandler.END
 
 
@@ -154,12 +175,30 @@ async def receive_week(update: Update, context: ContextTypes.DEFAULT_TYPE):
     day = week * 7 - 6
     user_id = update.effective_user.id
     db.save_user(user_id, day)
-
-    await update.message.reply_text(
-        f"✅ Чудово! Я запам'ятала, що ти на {week}-му тижні ({day}-й день).\n\n"
-        f"Щодня о 9:00 ранку тобі приходитиме порада 💛\n\n"
-        f"Напиши /today щоб отримати сьогоднішню пораду прямо зараз!"
-    )
+    
+    # Set trial start for new users
+    db.set_trial_start(user_id)
+    
+    # Send confirmation
+    await update.message.reply_text(msg.onboarding_confirmation(day, week))
+    
+    # Send today's tip + offer
+    current_day = db.get_current_day(user_id)
+    day_tips = tips.get_tips_for_day(current_day)
+    
+    if day_tips:
+        # Send tips
+        await send_tips(user_id, current_day, day_tips, context)
+        
+        # Send offer with button
+        keyboard = [[InlineKeyboardButton(msg.ONBOARDING_BUTTON_TEXT, url=msg.ONBOARDING_BUTTON_URL)]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=msg.ONBOARDING_OFFER,
+            reply_markup=reply_markup
+        )
+    
     return ConversationHandler.END
 
 
