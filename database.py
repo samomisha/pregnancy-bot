@@ -49,8 +49,32 @@ class Database:
             conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(20)")
             conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_end_date TIMESTAMP")
             conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_start DATE")
+            # Analytics columns
+            conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS term_entered_at TIMESTAMP")
+            conn.run("ALTER TABLE users ADD COLUMN IF NOT EXISTS first_paid_at TIMESTAMP")
         except:
             pass
+        
+        # Create subscription_events table
+        conn.run("""
+            CREATE TABLE IF NOT EXISTS subscription_events (
+                id SERIAL PRIMARY KEY,
+                user_id BIGINT NOT NULL,
+                event_type VARCHAR(20) NOT NULL,
+                event_date TIMESTAMP NOT NULL DEFAULT NOW(),
+                amount NUMERIC(10,2),
+                FOREIGN KEY (user_id) REFERENCES users(user_id) ON DELETE CASCADE
+            )
+        """)
+        
+        # Create indexes
+        try:
+            conn.run("CREATE INDEX IF NOT EXISTS idx_subscription_events_user_id ON subscription_events(user_id)")
+            conn.run("CREATE INDEX IF NOT EXISTS idx_subscription_events_event_type ON subscription_events(event_type)")
+            conn.run("CREATE INDEX IF NOT EXISTS idx_subscription_events_event_date ON subscription_events(event_date)")
+        except:
+            pass
+        
         conn.close()
 
     def save_user(self, user_id: int, start_day: int):
@@ -358,3 +382,114 @@ class Database:
         if rows:
             return rows[0][0]
         return None
+    
+    # Analytics methods
+    
+    def set_term_entered(self, user_id: int):
+        """Set term_entered_at timestamp when user enters pregnancy term."""
+        now = datetime.utcnow()
+        conn = self._get_conn()
+        conn.run(
+            "UPDATE users SET term_entered_at = :term_entered_at WHERE user_id = :user_id AND term_entered_at IS NULL",
+            term_entered_at=now, user_id=user_id
+        )
+        conn.close()
+    
+    def set_first_paid(self, user_id: int):
+        """Set first_paid_at timestamp when user makes first payment."""
+        now = datetime.utcnow()
+        conn = self._get_conn()
+        conn.run(
+            "UPDATE users SET first_paid_at = :first_paid_at WHERE user_id = :user_id AND first_paid_at IS NULL",
+            first_paid_at=now, user_id=user_id
+        )
+        conn.close()
+    
+    def add_subscription_event(self, user_id: int, event_type: str, amount: float = None):
+        """Add subscription event to subscription_events table."""
+        conn = self._get_conn()
+        conn.run(
+            """INSERT INTO subscription_events (user_id, event_type, amount)
+               VALUES (:user_id, :event_type, :amount)""",
+            user_id=user_id, event_type=event_type, amount=amount
+        )
+        conn.close()
+    
+    def get_analytics_stats(self):
+        """Get analytics statistics for admin dashboard."""
+        conn = self._get_conn()
+        
+        # Funnel metrics
+        total_registered = conn.run("SELECT COUNT(*) FROM users")[0][0]
+        entered_term = conn.run("SELECT COUNT(*) FROM users WHERE term_entered_at IS NOT NULL")[0][0]
+        started_trial = conn.run("SELECT COUNT(*) FROM users WHERE trial_start IS NOT NULL")[0][0]
+        first_paid = conn.run("SELECT COUNT(*) FROM users WHERE first_paid_at IS NOT NULL")[0][0]
+        
+        # Subscription metrics
+        active_subscriptions = conn.run("SELECT COUNT(*) FROM users WHERE subscription_status = 'active'")[0][0]
+        mrr = active_subscriptions * 99  # 99 грн per subscription
+        
+        # Activity metrics
+        seven_days_ago = datetime.utcnow() - timedelta(days=7)
+        wau = conn.run(
+            "SELECT COUNT(*) FROM users WHERE last_active >= :date",
+            date=seven_days_ago
+        )[0][0]
+        
+        # Retention metrics - calculate how many users are still paying after N months
+        retention = {}
+        for month in [1, 2, 3, 4]:
+            # Users who made first payment at least N months ago
+            months_ago = datetime.utcnow() - timedelta(days=30 * month)
+            users_eligible = conn.run(
+                "SELECT COUNT(*) FROM users WHERE first_paid_at <= :date",
+                date=months_ago
+            )[0][0]
+            
+            # Of those, how many have renewed in the last 30 days
+            if users_eligible > 0:
+                still_paying = conn.run(
+                    """SELECT COUNT(DISTINCT user_id) FROM subscription_events 
+                       WHERE event_type = 'renewed' 
+                       AND event_date >= :recent_date
+                       AND user_id IN (
+                           SELECT user_id FROM users WHERE first_paid_at <= :months_ago
+                       )""",
+                    recent_date=datetime.utcnow() - timedelta(days=30),
+                    months_ago=months_ago
+                )[0][0]
+                retention[f"month_{month}"] = {
+                    "eligible": users_eligible,
+                    "still_paying": still_paying,
+                    "percentage": round((still_paying / users_eligible) * 100, 1) if users_eligible > 0 else 0
+                }
+            else:
+                retention[f"month_{month}"] = {"eligible": 0, "still_paying": 0, "percentage": 0}
+        
+        conn.close()
+        
+        # Calculate conversion percentages
+        conv_term = round((entered_term / total_registered) * 100, 1) if total_registered > 0 else 0
+        conv_trial = round((started_trial / entered_term) * 100, 1) if entered_term > 0 else 0
+        conv_paid = round((first_paid / started_trial) * 100, 1) if started_trial > 0 else 0
+        
+        return {
+            "funnel": {
+                "total_registered": total_registered,
+                "entered_term": entered_term,
+                "started_trial": started_trial,
+                "first_paid": first_paid,
+                "conv_term": conv_term,
+                "conv_trial": conv_trial,
+                "conv_paid": conv_paid
+            },
+            "subscriptions": {
+                "active": active_subscriptions,
+                "mrr": mrr,
+                "total_ever_paid": first_paid
+            },
+            "activity": {
+                "wau": wau
+            },
+            "retention": retention
+        }
