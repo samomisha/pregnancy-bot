@@ -432,8 +432,13 @@ async def send_tips(chat_id, day, day_tips, context):
 
 async def send_daily_tips(context: ContextTypes.DEFAULT_TYPE):
     """Job: send daily tips to all users with subscription logic."""
+    from telegram.error import RetryAfter
+    
     users = db.get_all_users()
     logger.info(f"Sending daily tips to {len(users)} users")
+    
+    success_count = 0
+    error_count = 0
 
     for user in users:
         user_id = user["user_id"]
@@ -539,9 +544,32 @@ async def send_daily_tips(context: ContextTypes.DEFAULT_TYPE):
                 if day_tips:
                     await send_tips(user_id, current_day, day_tips, context)
                     logger.info(f"Sent tips to legacy user {user_id}")
+            
+            success_count += 1
+            
+            # Rate limiting: 5 messages per second
+            await asyncio.sleep(0.2)
                     
+        except RetryAfter as e:
+            # Handle Telegram rate limiting
+            logger.warning(f"Rate limited for user {user_id}, waiting {e.retry_after} seconds")
+            await asyncio.sleep(e.retry_after)
+            # Retry sending to this user
+            try:
+                # Retry the same logic (simplified - just retry tips)
+                if day_tips and subscription_status == 'active':
+                    await send_tips(user_id, current_day, day_tips, context)
+                    success_count += 1
+                    logger.info(f"Retry successful for user {user_id}")
+            except Exception as retry_error:
+                logger.error(f"Retry failed for user {user_id}: {retry_error}")
+                error_count += 1
         except Exception as e:
             logger.error(f"Failed to send to {user_id}: {e}")
+            error_count += 1
+    
+    # Log summary
+    logger.info(f"Daily tips broadcast completed: {success_count} successful, {error_count} errors")
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
