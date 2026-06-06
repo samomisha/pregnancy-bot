@@ -1,6 +1,7 @@
 import logging
 import os
 import asyncio
+import html
 from datetime import time, datetime, timedelta
 import pytz
 from aiohttp import web
@@ -1017,16 +1018,8 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
             username = "немає"
             name = "Без імені"
         
-        # Escape special characters for Markdown
-        def escape_markdown(text):
-            """Escape special characters for Markdown V2."""
-            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
-            for char in special_chars:
-                text = text.replace(char, f'\\{char}')
-            return text
-        
-        name_escaped = escape_markdown(name)
-        username_escaped = escape_markdown(username)
+        # Escape special characters for HTML
+        name_escaped = html.escape(name)
         
         # Get ZENEDU_BOT_ID from environment
         zenedu_bot_id = os.environ.get("ZENEDU_BOT_ID", "")
@@ -1034,20 +1027,19 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
         # Format timestamp
         timestamp = datetime.now(KYIV_TZ).strftime("%d.%m.%Y %H:%M")
         
-        # Build admin notification without Markdown links (to avoid parsing errors)
+        # Build admin notification with HTML and clickable link
         if zenedu_subscriber_id and zenedu_bot_id:
             subscriber_link = f"https://app.zenedu.io/bot/{zenedu_bot_id}/subscribers/{zenedu_subscriber_id}"
             admin_notification = (
                 f"🔔 Запит на скасування підписки\n\n"
-                f"👤 {name}\n"
+                f"👤 <a href=\"{subscriber_link}\">{name_escaped}</a>\n"
                 f"📱 @{username} | ID: {user_id}\n"
-                f"🔗 {subscriber_link}\n"
                 f"📅 {timestamp}"
             )
         else:
             admin_notification = (
                 f"🔔 Запит на скасування підписки\n\n"
-                f"👤 {name}\n"
+                f"👤 {name_escaped}\n"
                 f"📱 @{username} | ID: {user_id}\n"
                 f"📅 {timestamp}"
             )
@@ -1056,7 +1048,8 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
             try:
                 await context.bot.send_message(
                     chat_id=admin_id,
-                    text=admin_notification
+                    text=admin_notification,
+                    parse_mode="HTML"
                 )
             except Exception as e:
                 logger.error(f"Failed to send unsubscribe notification to admin {admin_id}: {e}")
