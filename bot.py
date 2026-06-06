@@ -951,6 +951,36 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
         await log_user_action(context, user_id, "unsubscribe: підтверджено")
 
 
+async def deleteuser_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete user from database (admin only)."""
+    user_id = update.effective_user.id
+    
+    if user_id not in ADMIN_IDS:
+        await update.message.reply_text("У тебе немає доступу до цієї команди.")
+        return
+    
+    # Get user_id from command arguments
+    if not context.args or len(context.args) != 1:
+        await update.message.reply_text("Використання: /deleteuser <user_id>")
+        return
+    
+    try:
+        target_user_id = int(context.args[0])
+    except ValueError:
+        await update.message.reply_text("❌ Невірний user_id. Має бути число.")
+        return
+    
+    # Check if user exists
+    user = db.get_user(target_user_id)
+    if not user:
+        await update.message.reply_text(f"❌ Юзер {target_user_id} не знайдений")
+        return
+    
+    # Delete user
+    db.delete_user(target_user_id)
+    await update.message.reply_text(f"✅ Юзер {target_user_id} видалений")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -1013,6 +1043,7 @@ async def main_async():
     app.add_handler(CommandHandler("maintenance", maintenance_command))
     app.add_handler(CommandHandler("watchmode", watchmode_command))
     app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
+    app.add_handler(CommandHandler("deleteuser", deleteuser_command))
     # Handle admin reply button
     app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
     app.add_handler(CallbackQueryHandler(maintenance_confirm_callback, pattern="^maintenance_confirm$"))
