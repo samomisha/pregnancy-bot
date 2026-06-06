@@ -990,8 +990,16 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
     user_id = query.from_user.id
     
     if query.data == "unsubscribe_no":
-        # User cancelled unsubscribe
-        await query.edit_message_text(msg.UNSUBSCRIBE_CANCELLED)
+        # User cancelled unsubscribe - delete message and send new one
+        try:
+            await query.message.delete()
+        except:
+            pass
+        
+        await context.bot.send_message(
+            chat_id=user_id,
+            text=msg.UNSUBSCRIBE_CANCELLED
+        )
         await log_user_action(context, user_id, "unsubscribe: скасовано")
     
     elif query.data == "unsubscribe_yes":
