@@ -776,9 +776,9 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user_id in ADMIN_IDS and user_id in admin_reply_to:
         target_user_id = admin_reply_to[user_id]
         
-        # Forward voice to user
+        # Copy voice to user (not forward, so user doesn't see it's from admin)
         try:
-            await context.bot.forward_message(
+            await context.bot.copy_message(
                 chat_id=target_user_id,
                 from_chat_id=user_id,
                 message_id=update.message.message_id
