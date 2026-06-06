@@ -253,6 +253,25 @@ async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     db.update_last_active(user_id)
     current_day = db.get_current_day(user_id)
+    
+    # Get subscription info for logging
+    sub_info = db.get_user_subscription(user_id)
+    subscription_status = sub_info.get("subscription_status") if sub_info else None
+    trial_start = sub_info.get("trial_start") if sub_info else None
+    
+    # Calculate trial day if applicable
+    trial_day = None
+    if trial_start:
+        trial_day = (date.today() - trial_start).days + 1
+    
+    # Log subscription info
+    logger.info(
+        f"/today for user {user_id}: "
+        f"subscription_status={subscription_status!r}, "
+        f"trial_start={trial_start}, "
+        f"trial_day={trial_day}"
+    )
+    
     day_tips = tips.get_tips_for_day(current_day)
 
     if day_tips:
