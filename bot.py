@@ -40,6 +40,7 @@ bot_start_time = None
 ASK_DAY = 0
 ASK_WEEK = 1
 ADMIN_REPLY = 2
+UNSUBSCRIBE_CONFIRM = 3
 
 # Timezone for daily sending (Kyiv)
 KYIV_TZ = pytz.timezone("Europe/Kyiv")
@@ -848,6 +849,94 @@ async def log_user_action(context: ContextTypes.DEFAULT_TYPE, user_id: int, acti
             logger.error(f"Failed to send watchmode log to admin {admin_id}: {e}")
 
 
+async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /unsubscribe command - request to cancel subscription."""
+    user_id = update.effective_user.id
+    user = db.get_user(user_id)
+    
+    if not user or user.get("status") != "active":
+        await update.message.reply_text(msg.NOT_REGISTERED)
+        return
+    
+    # Get subscription info
+    sub_info = db.get_user_subscription(user_id)
+    subscription_status = sub_info.get("subscription_status") if sub_info else None
+    
+    # Only allow unsubscribe for active subscribers
+    if subscription_status != 'active':
+        await update.message.reply_text("У тебе немає активної підписки для скасування.")
+        return
+    
+    # Show confirmation buttons
+    keyboard = [
+        [
+            InlineKeyboardButton(msg.UNSUBSCRIBE_BUTTON_YES, callback_data="unsubscribe_yes"),
+            InlineKeyboardButton(msg.UNSUBSCRIBE_BUTTON_NO, callback_data="unsubscribe_no")
+        ]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    await update.message.reply_text(msg.UNSUBSCRIBE_CONFIRM, reply_markup=reply_markup)
+    await log_user_action(context, user_id, "/unsubscribe")
+
+
+async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle unsubscribe confirmation buttons."""
+    query = query_update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    
+    if query.data == "unsubscribe_no":
+        # User cancelled unsubscribe
+        await query.edit_message_text(msg.UNSUBSCRIBE_CANCELLED)
+        await log_user_action(context, user_id, "unsubscribe: скасовано")
+    
+    elif query.data == "unsubscribe_yes":
+        # User confirmed unsubscribe
+        await query.edit_message_text(msg.UNSUBSCRIBE_CONFIRMED)
+        
+        # Get user info for admin notification
+        sub_info = db.get_user_subscription(user_id)
+        zenedu_subscriber_id = sub_info.get("zenedu_subscriber_id") if sub_info else None
+        
+        try:
+            chat = await context.bot.get_chat(user_id)
+            username = chat.username if chat.username else "немає"
+            name = f"{chat.first_name or ''} {chat.last_name or ''}".strip() or "Без імені"
+        except:
+            username = "немає"
+            name = "Без імені"
+        
+        # Get ZENEDU_BOT_ID from environment
+        zenedu_bot_id = os.environ.get("ZENEDU_BOT_ID", "")
+        
+        # Format timestamp
+        timestamp = datetime.now(KYIV_TZ).strftime("%d.%m.%Y %H:%M")
+        
+        # Send notification to admins
+        admin_notification = msg.unsubscribe_admin_notification(
+            name=name,
+            username=username,
+            user_id=user_id,
+            zenedu_subscriber_id=zenedu_subscriber_id,
+            zenedu_bot_id=zenedu_bot_id,
+            timestamp=timestamp
+        )
+        
+        for admin_id in ADMIN_IDS:
+            try:
+                await context.bot.send_message(
+                    chat_id=admin_id,
+                    text=admin_notification,
+                    parse_mode="Markdown"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send unsubscribe notification to admin {admin_id}: {e}")
+        
+        await log_user_action(context, user_id, "unsubscribe: підтверджено")
+
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Добре, до зустрічі! 👋")
     return ConversationHandler.END
@@ -909,9 +998,11 @@ async def main_async():
     app.add_handler(CommandHandler("reload", reload_command))
     app.add_handler(CommandHandler("maintenance", maintenance_command))
     app.add_handler(CommandHandler("watchmode", watchmode_command))
+    app.add_handler(CommandHandler("unsubscribe", unsubscribe_command))
     # Handle admin reply button
     app.add_handler(CallbackQueryHandler(admin_reply_callback, pattern="^reply_"))
     app.add_handler(CallbackQueryHandler(maintenance_confirm_callback, pattern="^maintenance_confirm$"))
+    app.add_handler(CallbackQueryHandler(unsubscribe_callback, pattern="^unsubscribe_"))
     
     # Handle all non-command text messages (both user messages and admin replies)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
