@@ -69,6 +69,19 @@ async def process_subscription_event(payload, event_name):
                         subscription_end_date=None
                     )
                     logger.info(f"Activated subscription for user {user_id}, subscriber_id {subscriber_id}")
+                    
+                    # Send welcome message to user
+                    if bot_application:
+                        try:
+                            # Import messages module
+                            import messages as msg
+                            await bot_application.bot.send_message(
+                                chat_id=user_id,
+                                text=msg.SUBSCRIPTION_ACTIVATED
+                            )
+                            logger.info(f"Sent subscription activated message to user {user_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to send subscription activated message to user {user_id}: {e}")
                 else:
                     logger.warning(f"User {user_id} not found in database, ignoring subscription event")
         
