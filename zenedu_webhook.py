@@ -119,9 +119,11 @@ async def process_subscription_event(payload, event_name):
                 if user:
                     # Parse expired_at timestamp
                     end_date = None
+                    end_date_formatted = "невідомо"
                     if expired_at:
                         try:
                             end_date = datetime.fromisoformat(expired_at.replace('Z', '+00:00'))
+                            end_date_formatted = end_date.strftime("%d.%m.%Y")
                         except:
                             logger.error(f"Failed to parse expired_at: {expired_at}")
                     
@@ -131,6 +133,28 @@ async def process_subscription_event(payload, event_name):
                         subscription_end_date=end_date
                     )
                     logger.info(f"Cancelled subscription for user {user_id}, expires at {expired_at}")
+                    
+                    # Send notification to user
+                    if bot_application:
+                        try:
+                            from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+                            
+                            message_text = (
+                                f"Твою підписку скасовано 💛 Поради будуть приходити до {end_date_formatted}. "
+                                f"Якщо передумаєш — завжди можна поновити 🌸"
+                            )
+                            
+                            keyboard = [[InlineKeyboardButton("Поновити", url="https://app.zenedu.io/l/1HZejLHnHqxJltIg")]]
+                            reply_markup = InlineKeyboardMarkup(keyboard)
+                            
+                            await bot_application.bot.send_message(
+                                chat_id=user_id,
+                                text=message_text,
+                                reply_markup=reply_markup
+                            )
+                            logger.info(f"Sent subscription cancelled message to user {user_id}")
+                        except Exception as e:
+                            logger.error(f"Failed to send subscription cancelled message to user {user_id}: {e}")
                 else:
                     logger.warning(f"User {user_id} not found in database, ignoring cancellation event")
     
