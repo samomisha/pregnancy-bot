@@ -329,7 +329,7 @@ async def send_tips(chat_id, day, day_tips, context):
 
 
 async def send_daily_tips(context: ContextTypes.DEFAULT_TYPE):
-    """Job: send daily tips to all users."""
+    """Job: send daily tips to all users with subscription logic."""
     users = db.get_all_users()
     logger.info(f"Sending daily tips to {len(users)} users")
 
@@ -341,16 +341,105 @@ async def send_daily_tips(context: ContextTypes.DEFAULT_TYPE):
             logger.info(f"User {user_id} finished pregnancy (day {current_day})")
             continue
 
+        # Get subscription info
+        sub_info = db.get_user_subscription(user_id)
+        subscription_status = sub_info.get("subscription_status") if sub_info else None
+        trial_start = sub_info.get("trial_start") if sub_info else None
+        subscription_end_date = sub_info.get("subscription_end_date") if sub_info else None
+
         day_tips = tips.get_tips_for_day(current_day)
 
-        if day_tips:
-            try:
-                await send_tips(user_id, current_day, day_tips, context)
-                logger.info(f"Sent tips for day {current_day} to user {user_id}")
-            except Exception as e:
-                logger.error(f"Failed to send to {user_id}: {e}")
-        else:
-            logger.info(f"No tips for day {current_day}, skipping user {user_id}")
+        try:
+            # Active subscription - send tips without any additions
+            if subscription_status == 'active':
+                if day_tips:
+                    await send_tips(user_id, current_day, day_tips, context)
+                    logger.info(f"Sent tips to active subscriber {user_id}")
+            
+            # Trial user (subscription_status is NULL)
+            elif subscription_status is None and trial_start:
+                trial_day = (date.today() - trial_start).days + 1
+                
+                if trial_day <= 5:
+                    # Days 1-5: send tip + trial message + button
+                    if day_tips:
+                        await send_tips(user_id, current_day, day_tips, context)
+                        
+                        if trial_day <= 4:
+                            days_left = 5 - trial_day
+                            trial_msg = msg.trial_days_left(days_left)
+                        else:
+                            trial_msg = msg.TRIAL_LAST_DAY
+                        
+                        keyboard = [[InlineKeyboardButton(msg.SUBSCRIBE_BUTTON_TEXT, url=msg.SUBSCRIBE_BUTTON_URL)]]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=trial_msg,
+                            reply_markup=reply_markup
+                        )
+                        logger.info(f"Sent trial day {trial_day} to user {user_id}")
+                
+                elif trial_day == 6:
+                    # Day 6: don't send tip, send trial ended message
+                    keyboard = [[InlineKeyboardButton(msg.SUBSCRIBE_BUTTON_TEXT, url=msg.SUBSCRIBE_BUTTON_URL)]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=msg.TRIAL_ENDED,
+                        reply_markup=reply_markup
+                    )
+                    logger.info(f"Sent trial ended to user {user_id}")
+                
+                elif trial_day in [20, 34, 48, 62, 76, 90]:  # Every 14 days after day 6
+                    # Reminder every 14 days
+                    keyboard = [[InlineKeyboardButton(msg.SUBSCRIBE_BUTTON_TEXT, url=msg.SUBSCRIBE_BUTTON_URL)]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    await context.bot.send_message(
+                        chat_id=user_id,
+                        text=msg.TRIAL_REMINDER,
+                        reply_markup=reply_markup
+                    )
+                    logger.info(f"Sent trial reminder to user {user_id} (day {trial_day})")
+            
+            # Cancelled subscription
+            elif subscription_status == 'cancelled':
+                today = datetime.utcnow()
+                
+                if subscription_end_date and today < subscription_end_date:
+                    # Still have access - send tips without additions
+                    if day_tips:
+                        await send_tips(user_id, current_day, day_tips, context)
+                        logger.info(f"Sent tips to cancelled subscriber {user_id} (still has access)")
+                else:
+                    # Access ended - calculate days since end
+                    if subscription_end_date:
+                        days_since_end = (today - subscription_end_date).days
+                    else:
+                        days_since_end = 0
+                    
+                    # Send reminder on day of expiry and every 14 days
+                    if days_since_end == 0 or days_since_end in [14, 28, 42, 56, 70, 84]:
+                        keyboard = [[InlineKeyboardButton(msg.RENEW_BUTTON_TEXT, url=msg.RENEW_BUTTON_URL)]]
+                        reply_markup = InlineKeyboardMarkup(keyboard)
+                        
+                        message_text = msg.SUBSCRIPTION_ENDED if days_since_end == 0 else msg.SUBSCRIPTION_ENDED_REMINDER
+                        
+                        await context.bot.send_message(
+                            chat_id=user_id,
+                            text=message_text,
+                            reply_markup=reply_markup
+                        )
+                        logger.info(f"Sent subscription ended reminder to user {user_id}")
+            
+            # Old users without trial_start - send tips normally
+            elif not trial_start:
+                if day_tips:
+                    await send_tips(user_id, current_day, day_tips, context)
+                    logger.info(f"Sent tips to legacy user {user_id}")
+                    
+        except Exception as e:
+            logger.error(f"Failed to send to {user_id}: {e}")
 
 
 async def stop_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
