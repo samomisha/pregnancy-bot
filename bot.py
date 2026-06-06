@@ -957,22 +957,29 @@ async def unsubscribe_command(update: Update, context: ContextTypes.DEFAULT_TYPE
     sub_info = db.get_user_subscription(user_id)
     subscription_status = sub_info.get("subscription_status") if sub_info else None
     
-    # Only allow unsubscribe for active subscribers
-    if subscription_status != 'active':
-        await update.message.reply_text("У тебе немає активної підписки для скасування.")
-        return
-    
-    # Show confirmation buttons
-    keyboard = [
-        [
-            InlineKeyboardButton(msg.UNSUBSCRIBE_BUTTON_YES, callback_data="unsubscribe_yes"),
-            InlineKeyboardButton(msg.UNSUBSCRIBE_BUTTON_NO, callback_data="unsubscribe_no")
+    # Check subscription status
+    if subscription_status == 'active':
+        # Show confirmation buttons for active subscription
+        keyboard = [
+            [
+                InlineKeyboardButton(msg.UNSUBSCRIBE_BUTTON_YES, callback_data="unsubscribe_yes"),
+                InlineKeyboardButton(msg.UNSUBSCRIBE_BUTTON_NO, callback_data="unsubscribe_no")
+            ]
         ]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        await update.message.reply_text(msg.UNSUBSCRIBE_CONFIRM, reply_markup=reply_markup)
+        await log_user_action(context, user_id, "/unsubscribe")
     
-    await update.message.reply_text(msg.UNSUBSCRIBE_CONFIRM, reply_markup=reply_markup)
-    await log_user_action(context, user_id, "/unsubscribe")
+    elif subscription_status == 'cancelled':
+        # Already cancelled
+        await update.message.reply_text("Твоя підписка вже скасована 🌸")
+        await log_user_action(context, user_id, "/unsubscribe (вже скасована)")
+    
+    else:
+        # No subscription (NULL or empty)
+        await update.message.reply_text("У тебе ще немає підписки 🌸")
+        await log_user_action(context, user_id, "/unsubscribe (немає підписки)")
 
 
 async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAULT_TYPE):
