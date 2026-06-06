@@ -769,10 +769,29 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle voice messages from users."""
+    """Handle voice messages from users and admin replies."""
     user_id = update.effective_user.id
     
-    # Only handle voice messages from registered users
+    # Check if this is an admin replying to a user with voice
+    if user_id in ADMIN_IDS and user_id in admin_reply_to:
+        target_user_id = admin_reply_to[user_id]
+        
+        # Forward voice to user
+        try:
+            await context.bot.forward_message(
+                chat_id=target_user_id,
+                from_chat_id=user_id,
+                message_id=update.message.message_id
+            )
+            await update.message.reply_text(f"✅ Голосове повідомлення надіслано користувачу!")
+        except Exception as e:
+            await update.message.reply_text(f"❌ Помилка при відправці: {e}")
+        
+        # Clear the reply state
+        del admin_reply_to[user_id]
+        return
+    
+    # Otherwise, handle as regular user voice message
     user = db.get_user(user_id)
     if not user or user.get("status") != "active":
         return
@@ -796,7 +815,10 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Log voice message for watchmode
     await log_user_action(context, user_id, "голосове повідомлення")
     
-    # Forward voice to admins with info message
+    # Forward voice to admins with info message and reply button
+    keyboard = [[InlineKeyboardButton("💬 Відповісти", callback_data=f"reply_{user_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
     for admin_id in ADMIN_IDS:
         try:
             # Forward the voice message
@@ -806,12 +828,13 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 message_id=update.message.message_id
             )
             
-            # Send info message
+            # Send info message with reply button
             info_message = f"🎤 Голосове від [{name}]({user_link}) | @{username} | ID: {user_id}"
             await context.bot.send_message(
                 chat_id=admin_id,
                 text=info_message,
-                parse_mode="Markdown"
+                parse_mode="Markdown",
+                reply_markup=reply_markup
             )
         except Exception as e:
             logger.error(f"Failed to forward voice to admin {admin_id}: {e}")
