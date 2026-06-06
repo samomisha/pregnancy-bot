@@ -45,7 +45,6 @@ UNSUBSCRIBE_CONFIRM = 3
 # Timezone for daily sending (Kyiv)
 KYIV_TZ = pytz.timezone("Europe/Kyiv")
 
-# Admin user IDs
 ADMIN_IDS = [260189699, 349776051]
 
 # Store admin reply state: {admin_id: user_id}
@@ -1018,28 +1017,46 @@ async def unsubscribe_callback(query_update: Update, context: ContextTypes.DEFAU
             username = "немає"
             name = "Без імені"
         
+        # Escape special characters for Markdown
+        def escape_markdown(text):
+            """Escape special characters for Markdown V2."""
+            special_chars = ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']
+            for char in special_chars:
+                text = text.replace(char, f'\\{char}')
+            return text
+        
+        name_escaped = escape_markdown(name)
+        username_escaped = escape_markdown(username)
+        
         # Get ZENEDU_BOT_ID from environment
         zenedu_bot_id = os.environ.get("ZENEDU_BOT_ID", "")
         
         # Format timestamp
         timestamp = datetime.now(KYIV_TZ).strftime("%d.%m.%Y %H:%M")
         
-        # Send notification to admins
-        admin_notification = msg.unsubscribe_admin_notification(
-            name=name,
-            username=username,
-            user_id=user_id,
-            zenedu_subscriber_id=zenedu_subscriber_id,
-            zenedu_bot_id=zenedu_bot_id,
-            timestamp=timestamp
-        )
+        # Build admin notification without Markdown links (to avoid parsing errors)
+        if zenedu_subscriber_id and zenedu_bot_id:
+            subscriber_link = f"https://app.zenedu.io/bot/{zenedu_bot_id}/subscribers/{zenedu_subscriber_id}"
+            admin_notification = (
+                f"🔔 Запит на скасування підписки\n\n"
+                f"👤 {name}\n"
+                f"📱 @{username} | ID: {user_id}\n"
+                f"🔗 {subscriber_link}\n"
+                f"📅 {timestamp}"
+            )
+        else:
+            admin_notification = (
+                f"🔔 Запит на скасування підписки\n\n"
+                f"👤 {name}\n"
+                f"📱 @{username} | ID: {user_id}\n"
+                f"📅 {timestamp}"
+            )
         
         for admin_id in ADMIN_IDS:
             try:
                 await context.bot.send_message(
                     chat_id=admin_id,
-                    text=admin_notification,
-                    parse_mode="Markdown"
+                    text=admin_notification
                 )
             except Exception as e:
                 logger.error(f"Failed to send unsubscribe notification to admin {admin_id}: {e}")
