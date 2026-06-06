@@ -751,9 +751,10 @@ async def main_async():
 
     app = Application.builder().token(token).build()
     
-    # Set bot application and watchmode_admins in webhook module
+    # Set bot application, watchmode_admins, and db in webhook module
     zenedu_webhook.bot_application = app
     zenedu_webhook.watchmode_admins = watchmode_admins
+    zenedu_webhook.db = db
 
     conv_handler = ConversationHandler(
         entry_points=[
