@@ -371,8 +371,8 @@ async def send_daily_tips(context: ContextTypes.DEFAULT_TYPE):
                     await send_tips(user_id, current_day, day_tips, context)
                     logger.info(f"Sent tips to active subscriber {user_id}")
             
-            # Trial user (subscription_status is NULL)
-            elif subscription_status is None and trial_start:
+            # Trial user (subscription_status is NULL or empty string)
+            elif (subscription_status is None or subscription_status == '') and trial_start:
                 trial_day = (date.today() - trial_start).days + 1
                 
                 if trial_day <= 5:
