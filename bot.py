@@ -838,6 +838,104 @@ async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.error(f"Failed to send voice to admin {admin_id}: {e}")
 
 
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle photo messages from users."""
+    user_id = update.effective_user.id
+    
+    # Only handle photos from registered users
+    user = db.get_user(user_id)
+    if not user or user.get("status") != "active":
+        return
+    
+    # Send confirmation to user
+    await update.message.reply_text("Почули тебе 🤍")
+    
+    # Get user info
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = chat.username if chat.username else "немає"
+        name = f"{chat.first_name or ''} {chat.last_name or ''}".strip() or "Без імені"
+    except:
+        username = "немає"
+        name = "Без імені"
+    
+    current_day = db.get_current_day(user_id)
+    
+    # Log photo for watchmode
+    await log_user_action(context, user_id, "фото")
+    
+    # Send photo to admins with caption and reply button
+    keyboard = [[InlineKeyboardButton("💬 Відповісти", callback_data=f"reply_{user_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Get largest photo file_id
+    photo_file_id = update.message.photo[-1].file_id
+    
+    # Create caption with user info
+    caption = f"📸 Фото від {name} | @{username} | ID: {user_id}"
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            # Send photo with caption and reply button
+            await context.bot.send_photo(
+                chat_id=admin_id,
+                photo=photo_file_id,
+                caption=caption,
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Failed to send photo to admin {admin_id}: {e}")
+
+
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle video messages from users."""
+    user_id = update.effective_user.id
+    
+    # Only handle videos from registered users
+    user = db.get_user(user_id)
+    if not user or user.get("status") != "active":
+        return
+    
+    # Send confirmation to user
+    await update.message.reply_text("Почули тебе 🤍")
+    
+    # Get user info
+    try:
+        chat = await context.bot.get_chat(user_id)
+        username = chat.username if chat.username else "немає"
+        name = f"{chat.first_name or ''} {chat.last_name or ''}".strip() or "Без імені"
+    except:
+        username = "немає"
+        name = "Без імені"
+    
+    current_day = db.get_current_day(user_id)
+    
+    # Log video for watchmode
+    await log_user_action(context, user_id, "відео")
+    
+    # Send video to admins with caption and reply button
+    keyboard = [[InlineKeyboardButton("💬 Відповісти", callback_data=f"reply_{user_id}")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    # Get video file_id
+    video_file_id = update.message.video.file_id
+    
+    # Create caption with user info
+    caption = f"🎥 Відео від {name} | @{username} | ID: {user_id}"
+    
+    for admin_id in ADMIN_IDS:
+        try:
+            # Send video with caption and reply button
+            await context.bot.send_video(
+                chat_id=admin_id,
+                video=video_file_id,
+                caption=caption,
+                reply_markup=reply_markup
+            )
+        except Exception as e:
+            logger.error(f"Failed to send video to admin {admin_id}: {e}")
+
+
 async def notify_admins_startup(context: ContextTypes.DEFAULT_TYPE):
     """Notify admins that bot has started."""
     for admin_id in ADMIN_IDS:
@@ -1276,6 +1374,12 @@ async def main_async():
     
     # Handle voice messages
     app.add_handler(MessageHandler(filters.VOICE, handle_voice))
+    
+    # Handle photo messages
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    
+    # Handle video messages
+    app.add_handler(MessageHandler(filters.VIDEO, handle_video))
 
     # Schedule tips every 2 hours (test mode: 2 hours = 1 day)
     job_queue = app.job_queue
