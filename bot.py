@@ -1113,6 +1113,13 @@ async def main_async():
     global bot_start_time
     bot_start_time = datetime.now()
     
+    # Log ZENEDU environment variables
+    logger.info("=== ZENEDU Environment Variables ===")
+    for key, value in os.environ.items():
+        if 'ZENEDU' in key:
+            logger.info(f"ENV: {key}={value}")
+    logger.info("=====================================")
+    
     token = os.environ.get("BOT_TOKEN")
     if not token:
         raise ValueError("BOT_TOKEN environment variable is not set!")
